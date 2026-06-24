@@ -14,6 +14,7 @@ from urllib.parse import unquote, urlparse
 from .analytics import build_skill_gap_summary
 from .database import (
     delete_jobs_by_source_prefixes,
+    delete_all_jobs,
     import_jobs_csv_text,
     init_db,
     list_jobs,
@@ -58,7 +59,7 @@ DASHBOARD_MANIFEST = {
     ],
 }
 DASHBOARD_SERVICE_WORKER = """
-const CACHE_NAME = 'jobmeta-dashboard-v55';
+const CACHE_NAME = 'jobmeta-dashboard-v56';
 const CORE_ASSETS = [
   '/',
   '/manifest.webmanifest',
@@ -291,6 +292,10 @@ def run_dashboard(
             nonlocal profile, latest_public_export
             parsed = urlparse(self.path)
             payload = self._read_json()
+            if parsed.path == "/api/reset-data":
+                deleted = delete_all_jobs(db_path)
+                self._send_json({"ok": True, "deleted": deleted, "jobs": []})
+                return
             if parsed.path == "/api/public-export":
                 result = create_public_export(PROJECT_ROOT)
                 latest_public_export = result.zip_path
@@ -1454,6 +1459,16 @@ DASHBOARD_HTML = r"""<!doctype html>
       color: var(--accent);
     }
 
+    .danger-button {
+      color: var(--danger);
+      border-color: rgba(155, 61, 61, 0.28);
+    }
+
+    .danger-button:hover {
+      background: rgba(155, 61, 61, 0.08);
+      color: var(--danger);
+    }
+
     button:hover {
       transform: translateY(-1px);
       background: #265c4e;
@@ -1515,6 +1530,10 @@ DASHBOARD_HTML = r"""<!doctype html>
     }
 
     body.modal-open .horizontal-scroll-dock {
+      display: none !important;
+    }
+
+    body.drawer-active .horizontal-scroll-dock {
       display: none !important;
     }
 
@@ -1964,6 +1983,7 @@ DASHBOARD_HTML = r"""<!doctype html>
         <button id="topManualButton" class="secondary-button">Job einfügen</button>
         <button id="topPromptButton" class="secondary-button">Prompt bearbeiten</button>
         <button id="exportCsvButton" class="secondary-button">CSV herunterladen</button>
+        <button id="resetDataButton" class="secondary-button danger-button">Daten zurücksetzen</button>
         <span class="hint">Alles bleibt lokal in deiner SQLite-Datenbank.</span>
       </div>
 
@@ -2325,6 +2345,7 @@ DASHBOARD_HTML = r"""<!doctype html>
       topManualButton: document.getElementById("topManualButton"),
       topPromptButton: document.getElementById("topPromptButton"),
       exportCsvButton: document.getElementById("exportCsvButton"),
+      resetDataButton: document.getElementById("resetDataButton"),
       demoDrawer: document.getElementById("demoDrawer"),
       demoBackdrop: document.getElementById("demoBackdrop"),
       closeDemoButton: document.getElementById("closeDemoButton"),
@@ -2450,6 +2471,12 @@ DASHBOARD_HTML = r"""<!doctype html>
       }
     }
 
+    function updateDrawerActiveState() {
+      const active = Boolean(document.querySelector(".drawer.visible"));
+      document.body.classList.toggle("drawer-active", active);
+      window.requestAnimationFrame(updateTableScrollHint);
+    }
+
     function changedFieldLabels(job, fields) {
       return Object.entries(fields)
         .filter(([key, value]) => String(job?.[key] || "") !== String(value || ""))
@@ -2459,7 +2486,8 @@ DASHBOARD_HTML = r"""<!doctype html>
     function updateTableScrollHint() {
       if (!els.tableWrap) return;
       const isVisible = els.tableWrap.style.display !== "none";
-      const isScrollable = isVisible && els.tableWrap.scrollWidth > els.tableWrap.clientWidth + 4;
+      const drawerActive = document.body.classList.contains("drawer-active") || document.body.classList.contains("modal-open");
+      const isScrollable = !drawerActive && isVisible && els.tableWrap.scrollWidth > els.tableWrap.clientWidth + 4;
       els.tableWrap.classList.toggle("is-scrollable", isScrollable);
       els.horizontalScrollDock.classList.toggle("visible", isScrollable);
       if (isScrollable) {
@@ -2548,11 +2576,13 @@ DASHBOARD_HTML = r"""<!doctype html>
       document.body.classList.add("modal-open");
       els.demoDrawer.classList.add("visible");
       els.demoDrawer.setAttribute("aria-hidden", "false");
+      updateDrawerActiveState();
     }
 
     function hideDemoDrawer() {
       els.demoDrawer.classList.remove("visible");
       els.demoDrawer.setAttribute("aria-hidden", "true");
+      updateDrawerActiveState();
       document.body.classList.remove("modal-open");
       setDemoChoiceLock(false);
     }
@@ -3046,12 +3076,14 @@ DASHBOARD_HTML = r"""<!doctype html>
     function openManual() {
       els.manualDrawer.classList.add("visible");
       els.manualDrawer.setAttribute("aria-hidden", "false");
+      updateDrawerActiveState();
       els.manualPaste.focus();
     }
 
     function closeManual() {
       els.manualDrawer.classList.remove("visible");
       els.manualDrawer.setAttribute("aria-hidden", "true");
+      updateDrawerActiveState();
     }
 
     function parseManualText() {
@@ -3419,6 +3451,31 @@ DASHBOARD_HTML = r"""<!doctype html>
       els.exportCsvButton.disabled = false;
     }
 
+    async function resetData() {
+      const jobCount = jobs.length;
+      const confirmation = jobCount
+        ? `Alle ${jobCount} Jobdaten in diesem Modus löschen? Dein Profil bleibt erhalten.`
+        : "Es sind aktuell keine Jobs geladen. Trotzdem zurücksetzen?";
+      if (!window.confirm(confirmation)) return;
+
+      els.resetDataButton.disabled = true;
+      setSaveState("Setze Jobdaten zurück ...", "saving", null);
+      const response = await fetch("/api/reset-data", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        setSaveState(payload.error || "Daten konnten nicht zurückgesetzt werden", "error", 3600, true);
+        els.resetDataButton.disabled = false;
+        return;
+      }
+      jobs = payload.jobs || [];
+      analytics = { learning_priorities: [], blocking_gaps: [], learnable_gaps: [], tools: [] };
+      hydrateSourceFilter();
+      render();
+      await loadAnalytics();
+      setSaveState(`Daten zurückgesetzt: ${payload.deleted || jobCount} Jobs gelöscht`, "ok", 3200, true);
+      els.resetDataButton.disabled = false;
+    }
+
     function defaultResearchPrompt() {
       const query = els.harvestQuery.value || "Junior Informationsmanagement Remote Hamburg";
       return `Suche aktuelle Stellenanzeigen zu "${query}". Erstelle eine CSV im JobMeta-Format mit exakt diesen Spalten:
@@ -3442,17 +3499,20 @@ Nutze bei url immer den direkten Link zur einzelnen Stellenanzeige, nicht den Li
       ensurePromptText();
       els.promptDrawer.classList.add("visible");
       els.promptDrawer.setAttribute("aria-hidden", "false");
+      updateDrawerActiveState();
       els.researchPromptText.focus();
     }
 
     function closePromptEditor() {
       els.promptDrawer.classList.remove("visible");
       els.promptDrawer.setAttribute("aria-hidden", "true");
+      updateDrawerActiveState();
     }
 
     async function openProfileEditor() {
       els.profileDrawer.classList.add("visible");
       els.profileDrawer.setAttribute("aria-hidden", "false");
+      updateDrawerActiveState();
       await loadProfileJson();
       els.profileJsonText.focus();
     }
@@ -3460,6 +3520,7 @@ Nutze bei url immer den direkten Link zur einzelnen Stellenanzeige, nicht den Li
     function closeProfileEditor() {
       els.profileDrawer.classList.remove("visible");
       els.profileDrawer.setAttribute("aria-hidden", "true");
+      updateDrawerActiveState();
     }
 
     async function loadProfileJson() {
@@ -3574,6 +3635,7 @@ Nutze bei url immer den direkten Link zur einzelnen Stellenanzeige, nicht den Li
     els.openManualButton.addEventListener("click", openManual);
     els.topManualButton.addEventListener("click", openManual);
     els.exportCsvButton.addEventListener("click", exportCsv);
+    els.resetDataButton.addEventListener("click", resetData);
     els.parseManualButton.addEventListener("click", parseManualText);
     els.saveManualButton.addEventListener("click", saveManualJob);
     els.columnChooser.querySelectorAll("[data-column-toggle]").forEach(toggle => {
