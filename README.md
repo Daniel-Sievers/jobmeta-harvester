@@ -50,26 +50,29 @@ welche Stellen realistisch, interessant oder eher Lernpfade für später sind.
 
 ## Screenshots
 
-Die folgenden Screenshots sind neutrale Mockups ohne echte Bewerbungsdaten.
-Für ein öffentliches Repository sollten keine echten Stellenlisten, CV-Daten
-oder privaten Notizen in Screenshots auftauchen.
+Die Screenshots zeigen die aktuelle Oberfläche mit neutralen Demo-Daten. Es sind
+keine privaten Bewerbungsdaten, echten Lebensläufe oder persönlichen Notizen
+enthalten.
 
-### Dashboard-Übersicht
+### Dashboard mit Demo-Daten
 
-![Dashboard overview](docs/assets/screenshots/dashboard-overview.svg)
+![Dashboard mit Demo-Daten](docs/assets/screenshots/01-dashboard-start.png)
 
-### Jobdetails und Bewerbungsnotizen
+### Recherche-Prompt bearbeiten
 
-![Job details](docs/assets/screenshots/job-details.svg)
+![Recherche-Prompt bearbeiten](docs/assets/screenshots/02-research-prompt.png)
 
-### Public-/GitHub-Export
+### Jobdetail, Skill-Gaps und Bewerbungsnotizen
 
-![Public export](docs/assets/screenshots/public-export.svg)
+![Jobdetail und Skill-Gaps](docs/assets/screenshots/03-job-detail.png)
 
-### Browser-Clipper Workflow
+### Tabelle mit Scores und Statusfeldern
 
-![Browser extension workflow](docs/assets/screenshots/browser-extension-workflow.svg)
+![Vollbildansicht der Jobtabelle](docs/assets/screenshots/04-fullscreen-ratings.png)
 
+### Daten zurücksetzen und neu starten
+
+![Zurückgesetztes Dashboard](docs/assets/screenshots/05-reset-empty-state.png)
 
 ## Live-Demo / PWA
 
