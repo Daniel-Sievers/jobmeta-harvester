@@ -2888,59 +2888,62 @@ Nutze bei url immer den direkten Link zur einzelnen Stellenanzeige, nicht den Li
       control.addEventListener("input", render);
       control.addEventListener("change", render);
     });
-    els.viewMode.addEventListener("change", applyViewMode);
-    els.fitTable.addEventListener("change", applyViewMode);
-    els.topDemoButton.addEventListener("click", openDemo);
-    els.harvestMode.addEventListener("change", updateHarvestModeUi);
-    els.harvestButton.addEventListener("click", harvestJobs);
-    els.topHarvestButton.addEventListener("click", harvestJobs);
-    els.emptyHarvestButton.addEventListener("click", harvestJobs);
-    els.importCsvButton.addEventListener("click", importCsv);
-    els.topImportButton.addEventListener("click", () => els.csvFile.click());
-    els.emptyImportButton.addEventListener("click", () => els.csvFile.click());
-    els.csvFile.addEventListener("change", () => {
+    if (els.viewMode) els.viewMode.addEventListener("change", applyViewMode);
+    if (els.fitTable) els.fitTable.addEventListener("change", applyViewMode);
+    if (els.topDemoButton) els.topDemoButton.addEventListener("click", openDemo);
+    if (els.harvestMode) els.harvestMode.addEventListener("change", updateHarvestModeUi);
+    if (els.harvestButton) els.harvestButton.addEventListener("click", harvestJobs);
+    if (els.topHarvestButton) els.topHarvestButton.addEventListener("click", harvestJobs);
+    if (els.emptyHarvestButton) els.emptyHarvestButton.addEventListener("click", harvestJobs);
+    if (els.importCsvButton) els.importCsvButton.addEventListener("click", importCsv);
+    if (els.topImportButton && els.csvFile) els.topImportButton.addEventListener("click", () => els.csvFile.click());
+    if (els.emptyImportButton && els.csvFile) els.emptyImportButton.addEventListener("click", () => els.csvFile.click());
+    if (els.csvFile) els.csvFile.addEventListener("change", () => {
       if (els.csvFile.files.length) importCsv();
     });
-    els.importCvButton.addEventListener("click", () => els.cvFile.click());
-    els.topCvButton.addEventListener("click", () => els.cvFile.click());
-    els.cvFile.addEventListener("change", () => {
+    if (els.importCvButton && els.cvFile) els.importCvButton.addEventListener("click", () => els.cvFile.click());
+    if (els.topCvButton && els.cvFile) els.topCvButton.addEventListener("click", () => els.cvFile.click());
+    if (els.cvFile) els.cvFile.addEventListener("change", () => {
       if (els.cvFile.files.length) importCvProfile();
     });
-    els.editProfileButton.addEventListener("click", openProfileEditor);
-    els.topProfileButton.addEventListener("click", openProfileEditor);
-    els.saveProfileButton.addEventListener("click", saveProfileJson);
-    els.reloadProfileButton.addEventListener("click", loadProfileJson);
-    els.copyPromptButton.addEventListener("click", copyResearchPrompt);
-    els.editPromptButton.addEventListener("click", openPromptEditor);
-    els.topPromptButton.addEventListener("click", openPromptEditor);
-    els.copyEditedPromptButton.addEventListener("click", copyResearchPrompt);
-    els.resetPromptButton.addEventListener("click", resetPrompt);
-    els.openManualButton.addEventListener("click", openManual);
-    els.topManualButton.addEventListener("click", openManual);
-    els.exportCsvButton.addEventListener("click", exportCsv);
+    if (els.editProfileButton) els.editProfileButton.addEventListener("click", openProfileEditor);
+    if (els.topProfileButton) els.topProfileButton.addEventListener("click", openProfileEditor);
+    if (els.saveProfileButton) els.saveProfileButton.addEventListener("click", saveProfileJson);
+    if (els.reloadProfileButton) els.reloadProfileButton.addEventListener("click", loadProfileJson);
+    if (els.copyPromptButton) els.copyPromptButton.addEventListener("click", copyResearchPrompt);
+    if (els.editPromptButton) els.editPromptButton.addEventListener("click", openPromptEditor);
+    if (els.topPromptButton) els.topPromptButton.addEventListener("click", openPromptEditor);
+    if (els.copyEditedPromptButton) els.copyEditedPromptButton.addEventListener("click", copyResearchPrompt);
+    if (els.resetPromptButton) els.resetPromptButton.addEventListener("click", resetPrompt);
+    if (els.openManualButton) els.openManualButton.addEventListener("click", openManual);
+    if (els.topManualButton) els.topManualButton.addEventListener("click", openManual);
+    if (els.exportCsvButton) els.exportCsvButton.addEventListener("click", exportCsv);
     if (els.resetDataButton) els.resetDataButton.addEventListener("click", resetData);
-    els.parseManualButton.addEventListener("click", parseManualText);
-    els.saveManualButton.addEventListener("click", saveManualJob);
-    els.columnChooser.querySelectorAll("[data-column-toggle]").forEach(toggle => {
+    if (els.parseManualButton) els.parseManualButton.addEventListener("click", parseManualText);
+    if (els.saveManualButton) els.saveManualButton.addEventListener("click", saveManualJob);
+    if (els.columnChooser) els.columnChooser.querySelectorAll("[data-column-toggle]").forEach(toggle => {
       toggle.addEventListener("change", applyColumnVisibility);
     });
-    els.drawerBackdrop.addEventListener("click", closeDetails);
+    if (els.drawerBackdrop) els.drawerBackdrop.addEventListener("click", closeDetails);
     if (els.closeDrawerButton) els.closeDrawerButton.addEventListener("click", closeDetails);
-    els.manualBackdrop.addEventListener("click", closeManual);
+    if (els.manualBackdrop) els.manualBackdrop.addEventListener("click", closeManual);
     if (els.closeManualButton) els.closeManualButton.addEventListener("click", closeManual);
-    els.promptBackdrop.addEventListener("click", closePromptEditor);
+    if (els.promptBackdrop) els.promptBackdrop.addEventListener("click", closePromptEditor);
     if (els.closePromptButton) els.closePromptButton.addEventListener("click", closePromptEditor);
-    els.profileBackdrop.addEventListener("click", closeProfileEditor);
+    if (els.profileBackdrop) els.profileBackdrop.addEventListener("click", closeProfileEditor);
     if (els.closeProfileButton) els.closeProfileButton.addEventListener("click", closeProfileEditor);
-    els.demoBackdrop.addEventListener("click", closeDemo);
+    if (els.demoBackdrop) els.demoBackdrop.addEventListener("click", closeDemo);
     if (els.closeDemoButton) els.closeDemoButton.addEventListener("click", closeDemo);
-    els.demoDrawer.querySelector(".drawer-panel").addEventListener("click", event => event.stopPropagation());
+    if (els.demoDrawer) {
+      const demoPanel = els.demoDrawer.querySelector(".drawer-panel");
+      if (demoPanel) demoPanel.addEventListener("click", event => event.stopPropagation());
+    }
     if (els.demoProfileOptions) els.demoProfileOptions.addEventListener("click", selectDemoOption);
     if (els.demoDatasetOptions) els.demoDatasetOptions.addEventListener("click", selectDemoOption);
     if (els.loadDemoButton) els.loadDemoButton.addEventListener("click", loadSelectedDemo);
     document.addEventListener("click", handleGlobalModalFallback, true);
-    els.horizontalScrollDock.addEventListener("scroll", syncTableScrollFromDock);
-    els.tableWrap.addEventListener("scroll", syncDockScrollFromTable);
+    if (els.horizontalScrollDock) els.horizontalScrollDock.addEventListener("scroll", syncTableScrollFromDock);
+    if (els.tableWrap) els.tableWrap.addEventListener("scroll", syncDockScrollFromTable);
     document.addEventListener("keydown", event => {
       if (event.key === "Escape") {
         closeDetails();
@@ -2954,7 +2957,7 @@ Nutze bei url immer den direkten Link zur einzelnen Stellenanzeige, nicht den Li
 
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+        navigator.serviceWorker.register("/service-worker.js").then(registration => registration.update()).catch(() => {});
       });
     }
 
@@ -2966,6 +2969,82 @@ Nutze bei url immer den direkten Link zur einzelnen Stellenanzeige, nicht den Li
     loadJobs().catch(() => {
       els.resultCount.textContent = "Dashboard konnte die Datenbank nicht laden.";
     });
+  </script>
+
+  <script>
+    // jobmeta-modal-rescue-v56g: delegated fallback for Vercel/browser caches with mixed JS/HTML.
+    (() => {
+      const marker = "jobmeta-modal-rescue-v56g";
+      if (window[marker]) return;
+      window[marker] = true;
+
+      function drawer(selector) { return document.querySelector(selector); }
+      function panelOf(target) { return target && target.closest && target.closest(".drawer-panel"); }
+      function setHidden(element, hidden) {
+        if (!element) return;
+        element.classList.toggle("visible", !hidden);
+        element.setAttribute("aria-hidden", hidden ? "true" : "false");
+      }
+      function updateBody() {
+        const active = Boolean(document.querySelector(".drawer.visible"));
+        document.body.classList.toggle("drawer-active", active);
+        if (typeof window.updateTableScrollHint === "function") window.requestAnimationFrame(window.updateTableScrollHint);
+      }
+      function closeDrawer(selector) { setHidden(drawer(selector), true); updateBody(); }
+      function forceFunction(name, fallback) {
+        if (typeof window[name] === "function") {
+          try { window[name](); return; } catch (_) { /* fall through */ }
+        }
+        fallback();
+      }
+
+      document.addEventListener("click", event => {
+        const target = event.target;
+        if (!target) return;
+
+        const demoOption = target.closest?.("[data-demo-kind][data-demo-key]");
+        if (demoOption) {
+          event.preventDefault();
+          if (typeof window.selectDemoOption === "function") {
+            window.selectDemoOption({ target: demoOption });
+          } else {
+            const kind = demoOption.dataset.demoKind;
+            const container = demoOption.parentElement;
+            if (container) container.querySelectorAll("[data-demo-kind]").forEach(button => {
+              button.classList.toggle("selected", button === demoOption);
+              button.setAttribute("aria-pressed", button === demoOption ? "true" : "false");
+            });
+            window.__jobmetaDemoChoice = window.__jobmetaDemoChoice || {};
+            window.__jobmetaDemoChoice[kind] = demoOption.dataset.demoKey;
+          }
+          return;
+        }
+
+        if (target.closest?.("#loadDemoButton")) {
+          if (typeof window.loadSelectedDemo === "function") {
+            event.preventDefault();
+            window.loadSelectedDemo();
+          }
+          return;
+        }
+
+        if (target.closest?.("#closeManualButton")) forceFunction("closeManual", () => closeDrawer("#manualDrawer"));
+        if (target.closest?.("#closeDrawerButton")) forceFunction("closeDetails", () => closeDrawer("#detailDrawer"));
+        if (target.closest?.("#closePromptButton")) forceFunction("closePromptEditor", () => closeDrawer("#promptDrawer"));
+        if (target.closest?.("#closeProfileButton")) forceFunction("closeProfileEditor", () => closeDrawer("#profileDrawer"));
+        if (target.closest?.("#closeDemoButton")) {
+          if (!document.body.classList.contains("demo-choice-required")) forceFunction("closeDemo", () => closeDrawer("#demoDrawer"));
+        }
+
+        if (target.matches?.("#manualBackdrop") && !panelOf(target)) forceFunction("closeManual", () => closeDrawer("#manualDrawer"));
+        if (target.matches?.("#drawerBackdrop") && !panelOf(target)) forceFunction("closeDetails", () => closeDrawer("#detailDrawer"));
+        if (target.matches?.("#promptBackdrop") && !panelOf(target)) forceFunction("closePromptEditor", () => closeDrawer("#promptDrawer"));
+        if (target.matches?.("#profileBackdrop") && !panelOf(target)) forceFunction("closeProfileEditor", () => closeDrawer("#profileDrawer"));
+        if (target.matches?.("#demoBackdrop") && !panelOf(target) && !document.body.classList.contains("demo-choice-required")) {
+          forceFunction("closeDemo", () => closeDrawer("#demoDrawer"));
+        }
+      }, true);
+    })();
   </script>
 </body>
 </html>

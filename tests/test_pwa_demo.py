@@ -80,7 +80,7 @@ class PwaDemoTest(unittest.TestCase):
         service_worker = (ROOT / "service-worker.js").read_text(encoding="utf-8")
         for asset in ["./index.html", "./app/index.html", "./demo/index.html", "./offline.html", "./static-api-shim.js", "./data/static-api-data.json", "./manifest.webmanifest", "./assets/favicon.ico", "./assets/icon.svg", "./assets/icon-32.png", "./version.json"]:
             self.assertIn(asset, service_worker)
-        self.assertIn("jobmeta-demo-v56", service_worker)
+        self.assertIn("jobmeta-demo-v56g", service_worker)
         self.assertIn("request.mode === 'navigate'", service_worker)
 
     def test_local_full_version_page_is_styled_and_useful(self) -> None:

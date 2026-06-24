@@ -108,7 +108,7 @@ def main() -> int:
                 fail(f"scored data for {profile}/{dataset} is unexpectedly small")
 
     service_worker = (ROOT / "service-worker.js").read_text(encoding="utf-8")
-    for marker in ["jobmeta-demo-v56", "./static-api-shim.js", "./data/static-api-data.json"]:
+    for marker in ["jobmeta-demo-v56g", "./static-api-shim.js", "./data/static-api-data.json"]:
         if marker not in service_worker:
             fail(f"service worker missing marker: {marker}")
 

@@ -39,6 +39,13 @@ def copy_dir(src_rel: str) -> None:
 
 
 def main() -> int:
+    # Keep /demo/ on the exact same dashboard shell as /app/.
+    app_index = ROOT / "app" / "index.html"
+    demo_index = ROOT / "demo" / "index.html"
+    if app_index.exists():
+        demo_index.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(app_index, demo_index)
+
     if PUBLIC.exists():
         shutil.rmtree(PUBLIC)
     PUBLIC.mkdir(parents=True)
