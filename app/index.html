@@ -805,6 +805,14 @@
       pointer-events: auto;
     }
 
+    body.demo-choice-required #demoDrawer,
+    body.demo-choice-required #demoDrawer .drawer-panel,
+    body.demo-choice-required #demoDrawer .demo-option,
+    body.demo-choice-required #demoDrawer button,
+    body.demo-choice-required #demoDrawer input {
+      pointer-events: auto !important;
+    }
+
     .drawer.visible {
       pointer-events: auto;
       visibility: visible;
@@ -1826,6 +1834,21 @@
       renderDemoOptions();
     }
 
+    function handleGlobalModalFallback(event) {
+      const target = event.target;
+      if (!target) return;
+      const demoChoice = target.closest?.("[data-demo-kind][data-demo-key]");
+      if (demoChoice && els.demoDrawer && els.demoDrawer.classList.contains("visible")) {
+        selectDemoOption({ target: demoChoice });
+        return;
+      }
+      if (target.closest?.("#closeManualButton")) closeManual();
+      if (target.closest?.("#closeDrawerButton")) closeDetails();
+      if (target.closest?.("#closePromptButton")) closePromptEditor();
+      if (target.closest?.("#closeProfileButton")) closeProfileEditor();
+      if (target.closest?.("#closeDemoButton")) closeDemo();
+    }
+
     async function openDemo() {
       if (!demoOptions.profiles.length || !demoOptions.datasets.length) {
         await loadDemoOptions();
@@ -2330,6 +2353,7 @@
     function closeDetails() {
       els.detailDrawer.classList.remove("visible");
       els.detailDrawer.setAttribute("aria-hidden", "true");
+      updateDrawerActiveState();
     }
 
     function openManual() {
@@ -2717,13 +2741,13 @@
         : "Es sind aktuell keine Jobs geladen. Trotzdem zurücksetzen?";
       if (!window.confirm(confirmation)) return;
 
-      els.resetDataButton.disabled = true;
+      if (els.resetDataButton) els.resetDataButton.disabled = true;
       setSaveState("Setze Jobdaten zurück ...", "saving", null);
       const response = await fetch("/api/reset-data", { method: "POST" });
       const payload = await response.json();
       if (!response.ok || !payload.ok) {
         setSaveState(payload.error || "Daten konnten nicht zurückgesetzt werden", "error", 3600, true);
-        els.resetDataButton.disabled = false;
+        if (els.resetDataButton) els.resetDataButton.disabled = false;
         return;
       }
       jobs = payload.jobs || [];
@@ -2732,7 +2756,7 @@
       render();
       await loadAnalytics();
       setSaveState(`Daten zurückgesetzt: ${payload.deleted || jobCount} Jobs gelöscht`, "ok", 3200, true);
-      els.resetDataButton.disabled = false;
+      if (els.resetDataButton) els.resetDataButton.disabled = false;
     }
 
     function defaultResearchPrompt() {
@@ -2894,26 +2918,27 @@ Nutze bei url immer den direkten Link zur einzelnen Stellenanzeige, nicht den Li
     els.openManualButton.addEventListener("click", openManual);
     els.topManualButton.addEventListener("click", openManual);
     els.exportCsvButton.addEventListener("click", exportCsv);
-    els.resetDataButton.addEventListener("click", resetData);
+    if (els.resetDataButton) els.resetDataButton.addEventListener("click", resetData);
     els.parseManualButton.addEventListener("click", parseManualText);
     els.saveManualButton.addEventListener("click", saveManualJob);
     els.columnChooser.querySelectorAll("[data-column-toggle]").forEach(toggle => {
       toggle.addEventListener("change", applyColumnVisibility);
     });
     els.drawerBackdrop.addEventListener("click", closeDetails);
-    els.closeDrawerButton.addEventListener("click", closeDetails);
+    if (els.closeDrawerButton) els.closeDrawerButton.addEventListener("click", closeDetails);
     els.manualBackdrop.addEventListener("click", closeManual);
-    els.closeManualButton.addEventListener("click", closeManual);
+    if (els.closeManualButton) els.closeManualButton.addEventListener("click", closeManual);
     els.promptBackdrop.addEventListener("click", closePromptEditor);
-    els.closePromptButton.addEventListener("click", closePromptEditor);
+    if (els.closePromptButton) els.closePromptButton.addEventListener("click", closePromptEditor);
     els.profileBackdrop.addEventListener("click", closeProfileEditor);
-    els.closeProfileButton.addEventListener("click", closeProfileEditor);
+    if (els.closeProfileButton) els.closeProfileButton.addEventListener("click", closeProfileEditor);
     els.demoBackdrop.addEventListener("click", closeDemo);
-    els.closeDemoButton.addEventListener("click", closeDemo);
+    if (els.closeDemoButton) els.closeDemoButton.addEventListener("click", closeDemo);
     els.demoDrawer.querySelector(".drawer-panel").addEventListener("click", event => event.stopPropagation());
-    els.demoProfileOptions.addEventListener("click", selectDemoOption);
-    els.demoDatasetOptions.addEventListener("click", selectDemoOption);
-    els.loadDemoButton.addEventListener("click", loadSelectedDemo);
+    if (els.demoProfileOptions) els.demoProfileOptions.addEventListener("click", selectDemoOption);
+    if (els.demoDatasetOptions) els.demoDatasetOptions.addEventListener("click", selectDemoOption);
+    if (els.loadDemoButton) els.loadDemoButton.addEventListener("click", loadSelectedDemo);
+    document.addEventListener("click", handleGlobalModalFallback, true);
     els.horizontalScrollDock.addEventListener("scroll", syncTableScrollFromDock);
     els.tableWrap.addEventListener("scroll", syncDockScrollFromTable);
     document.addEventListener("keydown", event => {
