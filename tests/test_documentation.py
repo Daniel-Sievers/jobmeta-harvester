@@ -48,3 +48,9 @@ class DocumentationTests(TestCase):
         for link in local_links:
             target = PROJECT_ROOT / link
             self.assertTrue(target.exists(), f"Missing README link target: {link}")
+
+    def test_public_readme_is_not_generated(self) -> None:
+        # public/ is generated Vercel output. Keeping a second README there makes
+        # GitHub show stale/broken screenshot links under /public/README.md.
+        self.assertFalse((PROJECT_ROOT / "public" / "README.md").exists())
+

@@ -14,9 +14,10 @@ FILES = [
     "offline.html",
     "version.json",
     "static-api-shim.js",
-    "README.md",
 ]
 DIRS = ["app", "demo", "local", "assets", "data"]
+# README.md intentionally stays only at repository root.
+# public/ is generated deploy output and should not contain a duplicate README.
 
 
 def copy_file(src_rel: str) -> None:
