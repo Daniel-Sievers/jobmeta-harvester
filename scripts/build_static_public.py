@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC = ROOT / "public"
 
+# public/ ist reiner Build-Output fuer Vercel und wird nicht versioniert.
+# Die Dashboard-Oberflaeche hat eine Quelle: app/index.html.
 FILES = [
     "index.html",
     "app.css",
@@ -15,23 +17,21 @@ FILES = [
     "version.json",
     "static-api-shim.js",
 ]
-DIRS = ["app", "demo", "local", "assets", "data"]
-# README.md intentionally stays only at repository root.
-# public/ is generated deploy output and should not contain a duplicate README.
+DIRS = ["app", "local", "assets", "data"]
 
 
-def copy_file(src_rel: str) -> None:
+def copy_file(src_rel: str, dest_rel: str | None = None) -> None:
     src = ROOT / src_rel
-    dest = PUBLIC / src_rel
+    dest = PUBLIC / (dest_rel or src_rel)
     if not src.exists():
         raise SystemExit(f"missing static file: {src_rel}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
 
 
-def copy_dir(src_rel: str) -> None:
+def copy_dir(src_rel: str, dest_rel: str | None = None) -> None:
     src = ROOT / src_rel
-    dest = PUBLIC / src_rel
+    dest = PUBLIC / (dest_rel or src_rel)
     if not src.exists():
         raise SystemExit(f"missing static directory: {src_rel}")
     if dest.exists():
@@ -40,13 +40,6 @@ def copy_dir(src_rel: str) -> None:
 
 
 def main() -> int:
-    # Keep /demo/ on the exact same dashboard shell as /app/.
-    app_index = ROOT / "app" / "index.html"
-    demo_index = ROOT / "demo" / "index.html"
-    if app_index.exists():
-        demo_index.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(app_index, demo_index)
-
     if PUBLIC.exists():
         shutil.rmtree(PUBLIC)
     PUBLIC.mkdir(parents=True)
@@ -55,6 +48,10 @@ def main() -> int:
         copy_file(rel)
     for rel in DIRS:
         copy_dir(rel)
+
+    # /demo/ nutzt dieselbe Dashboard-Shell wie /app/; nur der URL-Modus unterscheidet sich.
+    copy_file("app/index.html", "demo/index.html")
+    copy_dir("demo/check", "demo/check")
 
     favicon = ROOT / "assets" / "favicon.ico"
     if favicon.exists():

@@ -2,8 +2,6 @@
 
 Der Browser-Clipper ist die optionale Brücke zwischen einer einzelnen geöffneten Jobanzeige und dem lokalen JobMeta-Dashboard.
 
-![Browser extension workflow](assets/screenshots/browser-extension-workflow.svg)
-
 ## Wofür ist der Clipper gedacht?
 
 Der Clipper ist für den Fall gedacht, dass eine interessante Stelle im Browser offen ist und schnell in JobMeta übernommen werden soll.

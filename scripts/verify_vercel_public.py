@@ -35,6 +35,8 @@ def main() -> int:
     missing = [rel for rel in REQUIRED if not (PUBLIC / rel).exists()]
     if missing:
         fail("missing files in public/: " + ", ".join(missing))
+    if (PUBLIC / "README.md").exists():
+        fail("public/README.md should not exist; README belongs only to the repository root")
     html = (PUBLIC / "demo" / "index.html").read_text(encoding="utf-8")
     if "/static-api-shim.js" not in html or "JobMeta Dashboard" not in html:
         fail("public/demo/index.html does not contain the shared dashboard shell")

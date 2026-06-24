@@ -49,6 +49,15 @@ class DocumentationTests(TestCase):
             target = PROJECT_ROOT / link
             self.assertTrue(target.exists(), f"Missing README link target: {link}")
 
+    def test_public_readme_is_not_generated_or_tracked(self) -> None:
+        self.assertFalse((PROJECT_ROOT / "public" / "README.md").exists())
+        build_script = (PROJECT_ROOT / "scripts" / "build_static_public.py").read_text(encoding="utf-8")
+        self.assertNotIn('"README.md"', build_script)
+
+    def test_browser_extension_workflow_doc_has_no_deleted_screenshot_link(self) -> None:
+        doc = (PROJECT_ROOT / "docs" / "browser_extension_workflow.md").read_text(encoding="utf-8")
+        self.assertNotIn("browser-extension-workflow.svg", doc)
+
     def test_public_readme_is_not_generated(self) -> None:
         # public/ is generated Vercel output. Keeping a second README there makes
         # GitHub show stale/broken screenshot links under /public/README.md.
