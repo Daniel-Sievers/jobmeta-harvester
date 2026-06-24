@@ -1,0 +1,21 @@
+# Vercel deploys only the static PWA demo. Keep local database and build artefacts out of the hosted demo.
+dist/
+__pycache__/
+*.pyc
+*.sqlite
+*.db
+*.zip
+
+# Local/private configuration is not needed for the PWA demo.
+config/profile.json
+
+# Python app sources are part of the GitHub repo, but not required by the static Vercel deployment.
+src/
+tests/
+browser_extension/
+examples/
+
+# Development-only files.
+.venv/
+venv/
+.pytest_cache/

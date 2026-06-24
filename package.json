@@ -1,0 +1,12 @@
+{
+  "name": "jobmeta-harvester-demo",
+  "version": "0.55.0",
+  "private": true,
+  "description": "Installierbare PWA mit derselben Dashboard-Oberfläche wie die lokale App.",
+  "scripts": {
+    "dev": "python -m http.server 8080",
+    "test": "python -m unittest discover tests && node --check static-api-shim.js && python scripts/verify_live_demo_files.py && python scripts/verify_vercel_public.py",
+    "vercel-build": "node --check static-api-shim.js && python scripts/build_static_public.py && python scripts/verify_live_demo_files.py && python scripts/verify_vercel_public.py",
+    "check:pwa": "python scripts/verify_live_demo_files.py"
+  }
+}

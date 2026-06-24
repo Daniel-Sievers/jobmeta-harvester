@@ -1,0 +1,43 @@
+{
+  "snapshot_date": "2026-06-21",
+  "method": "KI-gestuetzte Webrecherche und Sichtung oeffentlich auffindbarer Trefferseiten; kein Login-Scraping, kein automatisiertes Plattform-Crawling.",
+  "datasets": [
+    {
+      "id": "information_management",
+      "file": "jobs_metadata_information_management_snapshot_2026-06-21.csv",
+      "rows": 36,
+      "search_focus": [
+        "Metadaten",
+        "Informationsmanagement",
+        "Knowledge Management",
+        "Technical Documentation",
+        "Data Quality"
+      ]
+    },
+    {
+      "id": "statistics",
+      "file": "jobs_statistics_data_analysis_snapshot_2026-06-21.csv",
+      "rows": 26,
+      "search_focus": [
+        "Statistik",
+        "Data Analyst",
+        "Reporting",
+        "BI",
+        "quantitative Analyse"
+      ]
+    },
+    {
+      "id": "it_support",
+      "file": "jobs_it_systemadministrator_snapshot_2026-06-21.csv",
+      "rows": 21,
+      "search_focus": [
+        "IT-Systemadministrator",
+        "IT Support",
+        "Application Support",
+        "Technical Support",
+        "Knowledge Base"
+      ]
+    }
+  ],
+  "warning": "Links koennen nach dem Snapshot-Datum veralten oder auf Such-/Listenansichten zeigen. Felder sind tabellentauglich gekuerzt/paraphrasiert."
+}

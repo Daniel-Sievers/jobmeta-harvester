@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+<title id="title">JobMeta Harvester Icon</title>
+<desc id="desc">Green app icon with metadata card, score chip and magnifying glass.</desc>
+<rect width="512" height="512" rx="112" fill="#2f6f5e"/>
+<path d="M0 370 512 216v296H0z" fill="#235c4e"/>
+<rect x="82" y="66" width="302" height="337" rx="46" fill="#fffcf6"/>
+<path d="M318 66h66v66z" fill="#e8e1d3"/>
+<rect x="124" y="148" width="297" height="41" rx="17" fill="#d2ece3"/>
+<rect x="124" y="220" width="246" height="36" rx="15" fill="#d2ece3"/>
+<rect x="124" y="287" width="169" height="36" rx="15" fill="#e1f1eb"/>
+<circle cx="103" cy="164" r="7" fill="#2f6f5e"/>
+<circle cx="103" cy="236" r="7" fill="#2f6f5e"/>
+<circle cx="103" cy="303" r="7" fill="#2f6f5e"/>
+<rect x="112" y="348" width="133" height="36" rx="18" fill="#eddfc4"/>
+<circle cx="136" cy="366" r="11" fill="#e5bb59"/>
+<circle cx="350" cy="333" r="66" fill="#e1f1eb" stroke="#1f4a3f" stroke-width="18"/>
+<path d="m397 380 66 66" stroke="#1f4a3f" stroke-width="22" stroke-linecap="round"/>
+<path d="m327 333 18 19 39-50" fill="none" stroke="#2f6f5e" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

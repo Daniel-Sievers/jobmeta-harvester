@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "JobMeta Clipper",
+  "version": "0.2.0",
+  "description": "Send the current job page to your local JobMeta Harvester dashboard.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "JobMeta Clipper",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*"
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "jobmeta-clipper@jobmeta.local",
+      "strict_min_version": "109.0"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+[project]
+name = "jobmeta-harvester"
+version = "0.1.0"
+description = "A small Python job metadata harvester and profile matcher."
+requires-python = ">=3.10"
+dependencies = [
+  "pypdf>=4.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

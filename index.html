@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobMeta Harvester</title>
+  <meta name="description" content="JobMeta Harvester: installierbare Demo und lokale Job-Metadaten-App.">
+  <meta name="theme-color" content="#2f6f5e">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/favicon.ico" sizes="any">
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body class="landing-page">
+  <main class="landing-shell">
+    <section class="landing-hero">
+      <div class="brand-mark landing-icon" aria-hidden="true"></div>
+      <p class="eyebrow">JobMeta Harvester</p>
+      <h1>Jobanzeigen wie Metadaten strukturieren, bewerten und vergleichen</h1>
+      <p class="landing-lead">Wähle den Demo-Modus für die öffentliche Portfolio-Demo oder öffne den Werkzeugmodus als leere, installierbare PWA. Beide Modi speichern getrennt im Browser.</p>
+      <div class="landing-actions">
+        <a class="landing-button primary" href="./demo/">Demo ansehen</a>
+        <a class="landing-button" href="./app/">Werkzeug öffnen</a>
+        <a class="landing-button quiet" href="./local/">Lokale Installation verstehen</a>
+      </div>
+    </section>
+
+    <section class="mode-grid" aria-label="Modus-Auswahl">
+      <article class="mode-card featured">
+        <p class="mode-kicker">Portfolio-Link</p>
+        <h2>Demo-Modus</h2>
+        <p>Startet mit verpflichtender Demo-Auswahl. Besucher:innen wählen ein Profil und einen Recherche-Snapshot, laden Daten und können danach die Oberfläche ausprobieren.</p>
+        <ul>
+          <li>keine privaten Daten</li>
+          <li>Recherche-Snapshot-Daten</li>
+          <li>installierbar als PWA</li>
+        </ul>
+        <a href="./demo/">Demo starten</a>
+      </article>
+
+      <article class="mode-card">
+        <p class="mode-kicker">Werkzeugmodus</p>
+        <h2>Leere App im Browser</h2>
+        <p>Öffnet dieselbe Oberfläche ohne erzwungene Demo-Auswahl. CSV-Import, manuelle Jobs und Profilbearbeitung funktionieren im Browser-Speicher.</p>
+        <ul>
+          <li>getrennter Speicher</li>
+          <li>keine Demo-Pflicht</li>
+          <li>gut zum Ausprobieren</li>
+        </ul>
+        <a href="./app/">Werkzeug öffnen</a>
+      </article>
+
+      <article class="mode-card">
+        <p class="mode-kicker">Lokale Installation</p>
+        <h2>Private Arbeitsversion</h2>
+        <p>Für echte Bewerbungsdaten ist die Python-/SQLite-Version gedacht. Sie läuft auf deinem Rechner, speichert lokal und ist die eigentliche private Arbeitsversion.</p>
+        <ul>
+          <li>SQLite-Datenbank lokal</li>
+          <li>CV-/CSV-Import robuster</li>
+          <li>Public-Export per Kommandozeile</li>
+        </ul>
+        <a href="./local/">Lokale Nutzung ansehen</a>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

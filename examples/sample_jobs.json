@@ -1,0 +1,98 @@
+[
+  {
+    "source": "sample",
+    "source_id": "sample-1",
+    "title": "Junior Knowledge Management Specialist",
+    "company": "Example Library Tech",
+    "location": "Hamburg / Remote",
+    "remote": true,
+    "url": "https://example.org/jobs/junior-knowledge-management",
+    "date_posted": "2026-06-01",
+    "description": "Support documentation, metadata quality, taxonomy work, and internal knowledge base improvements. Python basics are helpful.",
+    "tags": ["documentation", "metadata", "knowledge management", "python", "remote"]
+  },
+  {
+    "source": "sample",
+    "source_id": "sample-2",
+    "title": "Data Quality Analyst",
+    "company": "Demo Data Services",
+    "location": "Deutschland / Hybrid",
+    "remote": true,
+    "url": "https://example.org/jobs/data-quality-analyst",
+    "date_posted": "2026-06-03",
+    "description": "Review datasets, document quality issues, improve CSV and JSON workflows, and work with SQL-based reporting.",
+    "tags": ["data quality", "sql", "csv", "documentation", "hybrid"]
+  },
+  {
+    "source": "sample",
+    "source_id": "sample-3",
+    "title": "Technical Documentation Assistant",
+    "company": "Example Product Systems",
+    "location": "Hamburg",
+    "remote": false,
+    "url": "https://example.org/jobs/technical-documentation-assistant",
+    "date_posted": "2026-06-04",
+    "description": "Maintain technical documentation, structure product information, write markdown notes, and support internal review workflows.",
+    "tags": ["technical documentation", "markdown", "information management"]
+  },
+  {
+    "source": "sample",
+    "source_id": "sample-4",
+    "title": "Content Operations Coordinator",
+    "company": "Demo Publishing Hub",
+    "location": "Remote",
+    "remote": true,
+    "url": "https://example.org/jobs/content-operations-coordinator",
+    "date_posted": "2026-06-05",
+    "description": "Coordinate content updates, improve knowledge base entries, classify information, and maintain editorial metadata.",
+    "tags": ["content operations", "knowledge base", "metadata", "remote"]
+  },
+  {
+    "source": "sample",
+    "source_id": "sample-5",
+    "title": "Metadata and Taxonomy Assistant",
+    "company": "Example Archive Lab",
+    "location": "Berlin / Hybrid",
+    "remote": true,
+    "url": "https://example.org/jobs/metadata-taxonomy-assistant",
+    "date_posted": "2026-06-07",
+    "description": "Support metadata cleanup, taxonomy maintenance, classification rules, and documentation of cataloging decisions.",
+    "tags": ["metadata", "taxonomy", "classification", "documentation", "hybrid"]
+  },
+  {
+    "source": "sample",
+    "source_id": "sample-6",
+    "title": "Application Support Specialist",
+    "company": "Demo SaaS Support",
+    "location": "Hamburg / Hybrid",
+    "remote": true,
+    "url": "https://example.org/jobs/application-support-specialist",
+    "date_posted": "2026-06-08",
+    "description": "Handle user questions, document recurring issues, maintain support knowledge base articles, and work with ticket data.",
+    "tags": ["application support", "knowledge base", "documentation", "hybrid"]
+  },
+  {
+    "source": "sample",
+    "source_id": "sample-7",
+    "title": "Senior Fullstack Developer",
+    "company": "Example SaaS",
+    "location": "Berlin",
+    "remote": false,
+    "url": "https://example.org/jobs/senior-fullstack-developer",
+    "date_posted": "2026-06-09",
+    "description": "Senior role for a fullstack developer with 5+ years of experience in TypeScript, cloud systems, and team leadership.",
+    "tags": ["senior", "typescript", "cloud", "lead"]
+  },
+  {
+    "source": "sample",
+    "source_id": "sample-8",
+    "title": "Sales Development Representative",
+    "company": "Demo Growth Sales",
+    "location": "Hamburg",
+    "remote": false,
+    "url": "https://example.org/jobs/sales-development-representative",
+    "date_posted": "2026-06-10",
+    "description": "Sales role focused on outbound acquisition, phone calls, pipeline generation, and commission-based targets.",
+    "tags": ["sales", "akquise", "telefonakquise"]
+  }
+]

@@ -1,0 +1,67 @@
+Lea Informationsmanagement
+Informationsmanagement-, Metadaten- und Dokumentationsprofil
+
+Kontakt
+Hamburg / Remote oder Hybrid
+lea.information@example.org
+
+Profil
+Ich arbeite gerne an der Schnittstelle von Informationsmanagement,
+Dokumentation, Metadaten und digitaler Ordnung. Mich interessiert, wie
+Informationen beschrieben, klassifiziert, auffindbar gemacht und für
+Nutzer:innen verständlich aufbereitet werden.
+
+Kernkompetenzen
+- Informationsmanagement und Wissensorganisation
+- Metadaten und Metadatenmanagement
+- Klassifikation und Taxonomie
+- Dokumentation und technische Dokumentation
+- Knowledge Base Pflege
+- Recherche und strukturierte Auswertung
+- Datenqualität und Plausibilitätsprüfung
+- CSV, JSON und Tabellenstrukturen
+- Markdown und README-Dokumentation
+- GitHub für Projekt- und Dokumentationsablage
+- Python-Grundlagen für kleine Automatisierungen
+- SQL-Grundlagen für strukturierte Abfragen
+
+Projektbeispiele
+
+Metadata Quality Mini-Check
+- Beispielhafte CSV-Datensätze auf fehlende Felder geprüft
+- Metadatenfelder normalisiert und Dubletten markiert
+- kurze Qualitätsnotiz als Markdown dokumentiert
+
+Knowledge Folder Auditor
+- Markdown-Dateien nach Titeln, Tags und alten Inhalten geprüft
+- einfache Struktur- und Linkhinweise erstellt
+- Ergebnis als Übersicht dokumentiert
+
+JobMeta Harvester
+- Stellenanzeigen als Metadatensätze modelliert
+- CSV-Import, SQLite und Dashboard verbunden
+- Public-Export ohne private Daten umgesetzt
+
+Technische Grundlagen
+- Python: CSV/JSON lesen, kleine Skripte
+- SQL: SELECT, WHERE, ORDER BY, einfache Filter
+- Git/GitHub: Repositories, README, Dokumentation
+- Markdown: strukturierte Dokumente
+- HTML/CSS/JavaScript-Grundlagen
+
+Zielrollen
+- Junior Information Manager
+- Metadata Assistant
+- Documentation Operations Assistant
+- Knowledge Management Assistant
+- Taxonomy Assistant
+- Data Quality Assistant
+- Digital Library / Repository Assistant
+
+Was ich suche
+- Rollen mit Informationsstruktur, Metadaten oder Dokumentation
+- Junior- oder Einstiegsrollen
+- Remote oder Hybrid bevorzugt
+- Hamburg oder Deutschland
+- keine reinen Sales- oder Telefonakquise-Rollen
+- keine Senior-, Lead- oder Principal-Rollen

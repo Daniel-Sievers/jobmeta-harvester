@@ -1,0 +1,62 @@
+{
+  "profile_name": "Example information management profile",
+  "base_score": 28,
+  "positive_keywords": {
+    "data quality": 14,
+    "datenqualität": 14,
+    "documentation": 10,
+    "dokumentation": 10,
+    "technical documentation": 8,
+    "knowledge base": 10,
+    "wissensmanagement": 10,
+    "information management": 10,
+    "informationsmanagement": 10,
+    "metadata": 10,
+    "metadaten": 10,
+    "taxonomy": 8,
+    "taxonomie": 8,
+    "research": 6,
+    "recherche": 6,
+    "python": 5,
+    "sql": 5,
+    "csv": 4,
+    "json": 4,
+    "markdown": 5,
+    "github": 4,
+    "git": 4,
+    "remote": 4,
+    "hybrid": 3,
+    "junior": 5
+  },
+  "negative_keywords": {
+    "senior": -18,
+    "lead": -14,
+    "principal": -14,
+    "head of": -18,
+    "teamleiter": -14,
+    "teamleitung": -14,
+    "5+ years": -12,
+    "5 years": -12,
+    "sales": -10,
+    "vertrieb": -10,
+    "akquise": -10
+  },
+  "preferred_locations": [
+    "remote",
+    "home office",
+    "hybrid",
+    "hamburg",
+    "germany",
+    "deutschland"
+  ],
+  "title_boost_keywords": [
+    "data quality",
+    "documentation",
+    "knowledge",
+    "information",
+    "metadata",
+    "review"
+  ],
+  "profile_source": "example_profile",
+  "profile_notes": "Example profile for public GitHub demos. Replace with your own local profile for real use."
+}

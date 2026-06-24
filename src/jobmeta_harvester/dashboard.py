@@ -1,0 +1,3626 @@
+from __future__ import annotations
+
+import base64
+import binascii
+import csv
+import io
+import json
+import math
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+from .analytics import build_skill_gap_summary
+from .database import (
+    delete_jobs_by_source_prefixes,
+    import_jobs_csv_text,
+    init_db,
+    list_jobs,
+    rescore_jobs,
+    update_tracking,
+    upsert_job_records,
+    upsert_jobs,
+)
+from .exporters.csv_exporter import CSV_FIELDS
+from .http import FetchError
+from .models import JobPosting
+from .normalization import clean_tags, clean_text
+from .profile_builder import ProfileBuildError, build_profile_from_cv, extract_cv_text
+from .public_export import create_public_export
+from .sources import fetch_arbeitnow_jobs, fetch_remotive_jobs
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SAMPLE_JOBS = PROJECT_ROOT / "examples" / "sample_jobs.json"
+DASHBOARD_ASSETS = PROJECT_ROOT / "demo" / "assets"
+DASHBOARD_ICON_192 = DASHBOARD_ASSETS / "icon-192.png"
+DASHBOARD_ICON_512 = DASHBOARD_ASSETS / "icon-512.png"
+DASHBOARD_ICON_SIZES = [16, 32, 48, 128, 192, 256, 512]
+DASHBOARD_FAVICON = DASHBOARD_ASSETS / "favicon.ico"
+DASHBOARD_ICON_SVG = DASHBOARD_ASSETS / "icon.svg"
+DASHBOARD_MANIFEST = {
+    "id": "/",
+    "name": "JobMeta Harvester",
+    "short_name": "JobMeta",
+    "description": "Lokales Job-Metadaten-Dashboard mit Matching, Demo-Modus und CSV-Workflow.",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#f6f4ef",
+    "theme_color": "#2f6f5e",
+    "categories": ["productivity", "business", "utilities"],
+    "icons": [
+        {"src": "/assets/icon-48.png", "sizes": "48x48", "type": "image/png"},
+        {"src": "/assets/icon-128.png", "sizes": "128x128", "type": "image/png"},
+        {"src": "/assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+        {"src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+    ],
+}
+DASHBOARD_SERVICE_WORKER = """
+const CACHE_NAME = 'jobmeta-dashboard-v55';
+const CORE_ASSETS = [
+  '/',
+  '/manifest.webmanifest',
+  '/offline.html',
+  '/favicon.ico',
+  '/assets/icon.svg',
+  '/assets/icon-32.png',
+  '/assets/icon-192.png',
+  '/assets/icon-512.png'
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS)));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/')) {
+    return;
+  }
+  if (event.request.mode === 'navigate') {
+    event.respondWith(fetch(event.request).catch(() => caches.match('/offline.html')));
+    return;
+  }
+  event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
+});
+""".strip()
+DASHBOARD_OFFLINE_HTML = """<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobMeta offline</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f4ef; color: #1f2a24; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width: min(620px, calc(100vw - 32px)); padding: 32px; background: #fffcf6; border: 1px solid #ded9cf; border-radius: 20px; box-shadow: 0 18px 50px rgba(31,42,36,.08); }
+    h1 { margin-top: 0; }
+    code { background: #ede7dc; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>JobMeta ist gerade offline</h1>
+    <p>Die installierte App-Hülle ist verfügbar, aber die lokale Vollversion braucht den Python-Dashboard-Server.</p>
+    <p>Starte im Projektordner:</p>
+    <p><code>python -m jobmeta_harvester --dashboard</code></p>
+  </main>
+</body>
+</html>"""
+DEMO_SOURCE_PREFIXES = ["sample", "demo", "demo-it", "demo-stat", "snapshot"]
+DEMO_PROFILES = {
+    "information_management": {
+        "label": "Informationsmanagement",
+        "description": "Metadaten, Dokumentation, Wissensorganisation und Datenqualität.",
+        "path": PROJECT_ROOT / "examples" / "demo_cv_information_management.txt",
+    },
+    "statistics": {
+        "label": "Statistik / Datenanalyse",
+        "description": "Statistik, Reporting, quantitative Analyse, SPSS/RStudio/Power BI.",
+        "path": PROJECT_ROOT / "examples" / "demo_cv_statistics_profile.txt",
+    },
+    "it_support": {
+        "label": "IT / Systemadministration",
+        "description": "IT-Support, Systemadministration, Troubleshooting, Knowledge Base und technische Dokumentation.",
+        "path": PROJECT_ROOT / "examples" / "demo_cv_it_profile.txt",
+    },
+}
+DEMO_DATASETS = {
+    "information_management": {
+        "label": "Metadaten / Informationsmanagement",
+        "description": "Recherche-Snapshot 2026-06-21: Metadaten, Data Governance, Knowledge Management, Data Quality und Dokumentation.",
+        "path": PROJECT_ROOT / "examples" / "research_snapshots" / "jobs_metadata_information_management_snapshot_2026-06-21.csv",
+    },
+    "statistics": {
+        "label": "Statistik / Data Analysis",
+        "description": "Recherche-Snapshot 2026-06-21: Data Analyst, Reporting, Statistik, BI und quantitative Analyse.",
+        "path": PROJECT_ROOT / "examples" / "research_snapshots" / "jobs_statistics_data_analysis_snapshot_2026-06-21.csv",
+    },
+    "it_support": {
+        "label": "IT-Systemadministration / IT Support",
+        "description": "Recherche-Snapshot 2026-06-21: IT-Systemadministrator, Application Support, Helpdesk und Technical Support.",
+        "path": PROJECT_ROOT / "examples" / "research_snapshots" / "jobs_it_systemadministrator_snapshot_2026-06-21.csv",
+    },
+}
+HARVEST_LIMITS = [50, 100, 250, 500]
+PROFILE_TERM_PRIORITY = [
+    "data quality",
+    "datenqualität",
+    "documentation",
+    "dokumentation",
+    "technical documentation",
+    "knowledge base",
+    "wissensmanagement",
+    "information management",
+    "informationsmanagement",
+    "metadata",
+    "metadaten",
+    "ai review",
+    "trust & safety",
+    "content operations",
+    "taxonomy",
+    "taxonomie",
+    "katalogisierung",
+    "research",
+    "recherche",
+    "python",
+    "sql",
+]
+GENERIC_PROFILE_TERMS = {
+    "remote",
+    "hybrid",
+    "germany",
+    "deutschland",
+    "hamburg",
+    "junior",
+    "working student",
+    "werkstudent",
+    "html",
+    "css",
+    "git",
+    "github",
+}
+
+
+def run_dashboard(
+    db_path: Path,
+    profile_path: Path,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+) -> None:
+    init_db(db_path)
+    profile = _load_profile(profile_path)
+    latest_public_export: Path | None = None
+
+    class DashboardHandler(BaseHTTPRequestHandler):
+        def do_OPTIONS(self) -> None:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self._send_cors_headers()
+            self.end_headers()
+
+        def do_GET(self) -> None:
+            nonlocal latest_public_export
+            parsed = urlparse(self.path)
+            if parsed.path in {"/", "/app", "/app/", "/demo", "/demo/"}:
+                self._send_html(DASHBOARD_HTML)
+                return
+            if parsed.path == "/demo/check":
+                self._send_html("""<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>JobMeta Demo Check</title><style>body{font-family:system-ui;margin:40px;background:#f6f4ef;color:#1f2a24}main{max-width:720px;background:#fffcf6;border:1px solid #ded9cf;border-radius:18px;padding:28px}code{background:#ede7dc;border-radius:6px;padding:2px 6px}</style></head><body><main><h1>Demo-Check OK</h1><p>Der lokale Dashboard-Server liefert dieselbe App unter <code>/</code>, <code>/app/</code> und <code>/demo/</code> aus.</p><p><a href="/demo/">Demo-Modus öffnen</a> · <a href="/app/">Werkzeugmodus öffnen</a></p></main></body></html>""")
+                return
+            if parsed.path == "/manifest.webmanifest":
+                self._send_json(DASHBOARD_MANIFEST)
+                return
+            if parsed.path == "/service-worker.js":
+                self._send_text(DASHBOARD_SERVICE_WORKER, "application/javascript; charset=utf-8")
+                return
+            if parsed.path == "/offline.html":
+                self._send_html(DASHBOARD_OFFLINE_HTML)
+                return
+            if parsed.path == "/favicon.ico" and DASHBOARD_FAVICON.exists():
+                self._send_binary(DASHBOARD_FAVICON.read_bytes(), "image/x-icon")
+                return
+            if parsed.path == "/assets/icon.svg" and DASHBOARD_ICON_SVG.exists():
+                self._send_text(DASHBOARD_ICON_SVG.read_text(encoding="utf-8"), "image/svg+xml; charset=utf-8")
+                return
+            if parsed.path.startswith("/assets/icon-") and parsed.path.endswith(".png"):
+                icon_path = DASHBOARD_ASSETS / Path(parsed.path).name
+                if icon_path.exists():
+                    self._send_binary(icon_path.read_bytes(), "image/png")
+                    return
+            if parsed.path == "/api/jobs":
+                self._send_json({"jobs": list_jobs(db_path)})
+                return
+            if parsed.path == "/api/profile":
+                self._send_json({"profile": profile})
+                return
+            if parsed.path == "/api/analytics":
+                self._send_json({"analytics": build_skill_gap_summary(list_jobs(db_path))})
+                return
+            if parsed.path == "/api/demo-options":
+                self._send_json(_demo_options())
+                return
+            if parsed.path == "/api/export-csv":
+                self._send_csv(_records_to_csv(list_jobs(db_path)), "jobmeta-jobs.csv")
+                return
+            if parsed.path == "/api/public-export-download":
+                if not latest_public_export or not latest_public_export.exists():
+                    self._send_json({"error": "No public export available"}, HTTPStatus.NOT_FOUND)
+                    return
+                self._send_file(latest_public_export, "application/zip")
+                return
+            self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+
+        def do_PATCH(self) -> None:
+            parsed = urlparse(self.path)
+            prefix = "/api/jobs/"
+            if not parsed.path.startswith(prefix):
+                self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+                return
+
+            job_key = unquote(parsed.path[len(prefix) :])
+            payload = self._read_json()
+            updated = update_tracking(
+                db_path,
+                job_key,
+                application_status=payload.get("application_status"),
+                notes=payload.get("notes"),
+                decision=payload.get("decision"),
+                interest=payload.get("interest"),
+                entry_realistic=payload.get("entry_realistic"),
+                growth_value=payload.get("growth_value"),
+                priority=payload.get("priority"),
+                application_deadline=payload.get("application_deadline"),
+                next_action=payload.get("next_action"),
+                url=payload.get("url"),
+            )
+            if not updated:
+                self._send_json({"error": "Job not found"}, HTTPStatus.NOT_FOUND)
+                return
+            self._send_json({"ok": True})
+
+        def do_POST(self) -> None:
+            nonlocal profile, latest_public_export
+            parsed = urlparse(self.path)
+            payload = self._read_json()
+            if parsed.path == "/api/public-export":
+                result = create_public_export(PROJECT_ROOT)
+                latest_public_export = result.zip_path
+                self._send_json(
+                    {
+                        "ok": True,
+                        "zip_path": str(result.zip_path),
+                        "filename": result.zip_path.name,
+                        "download_url": "/api/public-export-download",
+                        "included_files": result.included_files,
+                        "excluded_files": result.excluded_files,
+                        "checklist": result.checklist,
+                    }
+                )
+                return
+            if parsed.path == "/api/load-demo":
+                try:
+                    profile_key = str(payload.get("profile_key", "") or "")
+                    dataset_key = str(payload.get("dataset_key", "") or "")
+                    reset_demo = bool(payload.get("reset_demo", False))
+                    result = _load_demo_selection(
+                        profile_key=profile_key,
+                        dataset_key=dataset_key,
+                        reset_demo=reset_demo,
+                        db_path=db_path,
+                        profile_path=profile_path,
+                    )
+                    profile = result["profile"]
+                    self._send_json(
+                        {
+                            "ok": True,
+                            "profile_label": result["profile_label"],
+                            "dataset_label": result["dataset_label"],
+                            "signals": result["signals"],
+                            "rescored": result["rescored"],
+                            "stats": result["stats"],
+                            "deleted_demo_jobs": result["deleted_demo_jobs"],
+                            "jobs": list_jobs(db_path),
+                        }
+                    )
+                except (KeyError, ProfileBuildError, OSError, ValueError) as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if parsed.path == "/api/profile-from-cv":
+                try:
+                    filename = str(payload.get("filename", "") or "")
+                    encoded = str(payload.get("content_base64", "") or "")
+                    text = str(payload.get("text", "") or "")
+                    if encoded:
+                        content = base64.b64decode(encoded, validate=True)
+                        text = extract_cv_text(filename, content)
+                    if not text.strip():
+                        raise ProfileBuildError("Kein CV-Text gefunden.")
+                    next_profile, signals = build_profile_from_cv(text)
+                    profile_path.parent.mkdir(parents=True, exist_ok=True)
+                    profile_path.write_text(
+                        json.dumps(next_profile, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    profile = next_profile
+                    rescored = rescore_jobs(profile, db_path)
+                    self._send_json(
+                        {
+                            "ok": True,
+                            "profile": next_profile,
+                            "signals": signals,
+                            "rescored": rescored,
+                            "jobs": list_jobs(db_path),
+                        }
+                    )
+                except (ProfileBuildError, binascii.Error, ValueError) as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if parsed.path == "/api/profile":
+                try:
+                    next_profile = json.loads(str(payload.get("profile_json", "") or ""))
+                    if not isinstance(next_profile, dict):
+                        raise ValueError("Das Profil muss ein JSON-Objekt sein.")
+                    profile_path.parent.mkdir(parents=True, exist_ok=True)
+                    profile_path.write_text(
+                        json.dumps(next_profile, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    profile = next_profile
+                    rescored = rescore_jobs(profile, db_path)
+                    self._send_json(
+                        {
+                            "ok": True,
+                            "profile": next_profile,
+                            "rescored": rescored,
+                            "jobs": list_jobs(db_path),
+                        }
+                    )
+                except (json.JSONDecodeError, ValueError) as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if parsed.path == "/api/import-csv":
+                stats = import_jobs_csv_text(payload.get("csv_text", ""), profile, db_path)
+                self._send_json({"ok": True, "stats": stats, "jobs": list_jobs(db_path)})
+                return
+            if parsed.path == "/api/manual-job":
+                record = payload.get("record", {})
+                stats = upsert_job_records([record], profile, db_path, update_tracking_fields=True)
+                self._send_json({"ok": True, "stats": stats, "jobs": list_jobs(db_path)})
+                return
+            if parsed.path == "/api/sample":
+                stats = upsert_jobs(_load_sample_jobs(), profile, db_path)
+                self._send_json({"ok": True, "stats": stats, "jobs": list_jobs(db_path)})
+                return
+            if parsed.path == "/api/harvest":
+                source = payload.get("source", "all")
+                limit = _harvest_limit(payload.get("limit", 50))
+                search_mode = str(payload.get("search_mode", "manual") or "manual")
+                query = [
+                    part.strip()
+                    for part in str(payload.get("query", "")).split(",")
+                    if part.strip()
+                ]
+                jobs, errors, plan = _harvest_jobs(source, limit, query, profile, search_mode)
+                stats = upsert_jobs(jobs, profile, db_path) if jobs else {
+                    "incoming": 0,
+                    "new": 0,
+                    "updated": 0,
+                    "duplicates": 0,
+                }
+                self._send_json({
+                    "ok": not errors,
+                    "stats": stats,
+                    "errors": errors,
+                    "plan": plan,
+                    "jobs": list_jobs(db_path),
+                })
+                return
+            self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+        def _read_json(self) -> dict:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not length:
+                return {}
+            raw = self.rfile.read(length).decode("utf-8")
+            return json.loads(raw)
+
+        def _send_cors_headers(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+        def _send_html(self, body: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+            encoded = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self._send_cors_headers()
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def _send_text(
+            self,
+            body: str,
+            content_type: str,
+            status: HTTPStatus = HTTPStatus.OK,
+        ) -> None:
+            encoded = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self._send_cors_headers()
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def _send_binary(
+            self,
+            data: bytes,
+            content_type: str,
+            status: HTTPStatus = HTTPStatus.OK,
+        ) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self._send_cors_headers()
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
+            encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self._send_cors_headers()
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def _send_csv(self, body: str, filename: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+            encoded = body.encode("utf-8-sig")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self._send_cors_headers()
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def _send_file(
+            self,
+            path: Path,
+            content_type: str,
+            status: HTTPStatus = HTTPStatus.OK,
+        ) -> None:
+            data = path.read_bytes()
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self._send_cors_headers()
+            self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = ThreadingHTTPServer((host, port), DashboardHandler)
+    print(f"JobMeta Dashboard running at http://{host}:{port}")
+    print(f"Using database: {db_path}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nDashboard stopped.")
+
+
+def _load_profile(path: Path) -> dict:
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _demo_options() -> dict:
+    return {
+        "profiles": [
+            {
+                "key": key,
+                "label": item["label"],
+                "description": item["description"],
+                "filename": item["path"].name,
+            }
+            for key, item in DEMO_PROFILES.items()
+        ],
+        "datasets": [
+            {
+                "key": key,
+                "label": item["label"],
+                "description": item["description"],
+                "filename": item["path"].name,
+            }
+            for key, item in DEMO_DATASETS.items()
+        ],
+        "notice": (
+            "Demo-Datensätze sind Recherche-Snapshots. "
+            "Sie wurden am 2026-06-21 KI-gestützt aus öffentlicher Websuche und sichtbaren Trefferseiten strukturiert; Links können veralten. "
+            "Große Jobplattformen werden dabei nicht automatisiert gecrawlt."
+        ),
+    }
+
+
+def _load_demo_selection(
+    profile_key: str,
+    dataset_key: str,
+    reset_demo: bool,
+    db_path: Path,
+    profile_path: Path,
+) -> dict:
+    profile_item = DEMO_PROFILES[profile_key]
+    dataset_item = DEMO_DATASETS[dataset_key]
+    cv_text = profile_item["path"].read_text(encoding="utf-8")
+    csv_text = dataset_item["path"].read_text(encoding="utf-8")
+
+    next_profile, signals = build_profile_from_cv(cv_text)
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        json.dumps(next_profile, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    deleted = (
+        delete_jobs_by_source_prefixes(db_path, DEMO_SOURCE_PREFIXES)
+        if reset_demo
+        else 0
+    )
+    stats = import_jobs_csv_text(csv_text, next_profile, db_path)
+    rescored = rescore_jobs(next_profile, db_path)
+    return {
+        "profile": next_profile,
+        "profile_label": profile_item["label"],
+        "dataset_label": dataset_item["label"],
+        "signals": signals,
+        "stats": stats,
+        "rescored": rescored,
+        "deleted_demo_jobs": deleted,
+    }
+
+
+def _fetchers(source: str) -> list[tuple[str, object]]:
+    fetchers = []
+    if source in {"all", "arbeitnow"}:
+        fetchers.append(("arbeitnow", fetch_arbeitnow_jobs))
+    if source in {"all", "remotive"}:
+        fetchers.append(("remotive", fetch_remotive_jobs))
+    return fetchers
+
+
+def _harvest_jobs(
+    source: str,
+    limit: int,
+    query: list[str],
+    profile: dict,
+    search_mode: str,
+) -> tuple[list[JobPosting], list[str], dict]:
+    mode = search_mode if search_mode in {"broad", "profile", "manual"} else "manual"
+    limit = _harvest_limit(limit)
+    query_batches = _query_batches(mode, query, profile)
+    per_batch_limit = max(10, math.ceil(limit / max(1, len(query_batches))))
+    jobs: list[JobPosting] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+
+    for source_name, fetcher in _fetchers(source):
+        source_count = 0
+        for batch in query_batches:
+            if source_count >= limit:
+                break
+            batch_limit = min(per_batch_limit, limit - source_count)
+            try:
+                fetched = fetcher(limit=batch_limit, query=batch)
+            except FetchError as exc:
+                label = " ".join(batch) if batch else "breit"
+                errors.append(f"{source_name} ({label}): {exc}")
+                continue
+            for job in fetched:
+                key = _job_identity(job)
+                if key in seen:
+                    continue
+                seen.add(key)
+                jobs.append(job)
+                source_count += 1
+                if source_count >= limit:
+                    break
+
+    plan = {
+        "mode": mode,
+        "limit_per_source": limit,
+        "queries": [" ".join(batch) if batch else "breit" for batch in query_batches],
+        "unique_jobs": len(jobs),
+    }
+    return jobs, errors, plan
+
+
+def _query_batches(mode: str, query: list[str], profile: dict) -> list[list[str]]:
+    if mode == "broad":
+        return [[]]
+    if mode == "profile":
+        return [[term] for term in _profile_search_terms(profile)]
+    return [query] if query else [[]]
+
+
+def _profile_search_terms(profile: dict, max_terms: int = 10) -> list[str]:
+    positive = profile.get("positive_keywords", {})
+    title_boost = {str(term).lower() for term in profile.get("title_boost_keywords", [])}
+    candidates: list[tuple[int, str]] = []
+
+    for index, term in enumerate(PROFILE_TERM_PRIORITY):
+        if term in positive or term in title_boost:
+            candidates.append((1000 - index, term))
+
+    for term, weight in positive.items():
+        text = str(term).strip().lower()
+        if _is_profile_search_term(text):
+            candidates.append((int(weight), text))
+
+    seen: set[str] = set()
+    terms: list[str] = []
+    for _, term in sorted(candidates, key=lambda item: (-item[0], item[1])):
+        if term in seen or not _is_profile_search_term(term):
+            continue
+        seen.add(term)
+        terms.append(term)
+        if len(terms) >= max_terms:
+            break
+    return terms or ["documentation", "metadata", "data quality"]
+
+
+def _is_profile_search_term(term: str) -> bool:
+    if len(term) < 3:
+        return False
+    if term in GENERIC_PROFILE_TERMS:
+        return False
+    return True
+
+
+def _harvest_limit(value: object) -> int:
+    try:
+        requested = int(value)
+    except (TypeError, ValueError):
+        requested = 50
+    for limit in HARVEST_LIMITS:
+        if requested <= limit:
+            return limit
+    return HARVEST_LIMITS[-1]
+
+
+def _job_identity(job: JobPosting) -> str:
+    if job.url:
+        return f"url:{job.url.lower()}"
+    if job.source_id:
+        return f"{job.source}:{job.source_id}".lower()
+    return "|".join([job.title, job.company, job.location]).lower()
+
+
+def _load_sample_jobs() -> list[JobPosting]:
+    with SAMPLE_JOBS.open(encoding="utf-8") as handle:
+        rows = json.load(handle)
+    return [
+        JobPosting(
+            source=clean_text(row.get("source")),
+            source_id=clean_text(row.get("source_id")),
+            title=clean_text(row.get("title")),
+            company=clean_text(row.get("company")),
+            location=clean_text(row.get("location")),
+            remote=row.get("remote"),
+            url=clean_text(row.get("url")),
+            date_posted=clean_text(row.get("date_posted")),
+            description=clean_text(row.get("description")),
+            tags=clean_tags(row.get("tags")),
+        )
+        for row in rows
+    ]
+
+
+def _records_to_csv(records: list[dict]) -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=CSV_FIELDS)
+    writer.writeheader()
+    for record in records:
+        writer.writerow({field: record.get(field, "") for field in CSV_FIELDS})
+    return output.getvalue()
+
+
+DASHBOARD_HTML = r"""<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobMeta Dashboard</title>
+  <meta name="theme-color" content="#2f6f5e">
+  <meta name="application-name" content="JobMeta Harvester">
+  <meta name="apple-mobile-web-app-title" content="JobMeta">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icon-32.png">
+  <link rel="apple-touch-icon" href="/assets/icon-192.png">
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --ink: #1f2a24;
+      --muted: #6d756f;
+      --line: #ded9cf;
+      --panel: #fffcf6;
+      --accent: #2f6f5e;
+      --accent-soft: #dbece4;
+      --warn: #9a5b28;
+      --danger: #9b3d3d;
+      --shadow: 0 18px 50px rgba(31, 42, 36, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, input, select, textarea {
+      font: inherit;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .shell {
+      min-height: 100svh;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100svh;
+      overflow: auto;
+      padding: 28px 24px;
+      border-right: 1px solid var(--line);
+      background: rgba(255, 252, 246, 0.68);
+      backdrop-filter: blur(16px);
+    }
+
+    main {
+      min-width: 0;
+      padding: 30px 30px 96px;
+    }
+
+    .brand {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 34px;
+    }
+
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      background: var(--accent);
+      background-image: url('/assets/icon-48.png');
+      background-size: cover;
+      background-position: center;
+      box-shadow: 0 8px 20px rgba(31, 42, 36, 0.10);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 23px;
+      line-height: 1.1;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .small {
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .nav-section {
+      display: grid;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .side-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .check-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .check-list label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .check-list input {
+      width: auto;
+      min-height: 0;
+    }
+
+    .nav-label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .metric-list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric strong {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) repeat(6, minmax(110px, 140px)) auto;
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--ink);
+      outline: none;
+      transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    }
+
+    input, select {
+      min-height: 42px;
+      padding: 0 12px;
+    }
+
+    textarea {
+      min-height: 78px;
+      padding: 10px 12px;
+      resize: vertical;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(47, 111, 94, 0.14);
+    }
+
+    .status-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    #saveState {
+      min-height: 24px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(47, 111, 94, 0.08);
+      color: var(--accent);
+      white-space: nowrap;
+      transition: background 160ms ease, color 160ms ease;
+    }
+
+    #saveState.is-saving {
+      background: rgba(170, 113, 43, 0.12);
+      color: #8a5a1f;
+    }
+
+    #saveState.is-error {
+      background: rgba(150, 54, 48, 0.12);
+      color: #963630;
+    }
+
+    .quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .quick-actions button {
+      min-width: 132px;
+    }
+
+    .quick-actions .hint {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+
+    .demo-column {
+      display: grid;
+      gap: 10px;
+    }
+
+    .demo-column h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .demo-option {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 4px;
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255, 252, 246, 0.76);
+      cursor: pointer;
+      text-align: left;
+      color: inherit;
+      font: inherit;
+      transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+    }
+
+    .demo-option:hover,
+    .demo-option:focus-visible,
+    .demo-option.selected {
+      border-color: var(--accent);
+      background: rgba(219, 236, 228, 0.52);
+      box-shadow: 0 0 0 3px rgba(47, 111, 94, 0.08);
+    }
+
+    .demo-option:active {
+      transform: translateY(1px);
+    }
+
+    .demo-option strong {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .demo-option span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .demo-notice {
+      margin: 14px 0;
+      padding: 12px;
+      border: 1px solid rgba(170, 113, 43, 0.22);
+      border-radius: 10px;
+      background: rgba(170, 113, 43, 0.08);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .demo-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+    }
+
+    .demo-reset {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .demo-reset input {
+      width: auto;
+      min-height: auto;
+    }
+
+    .empty-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .insights {
+      display: grid;
+      grid-template-columns: 1.2fr repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 22px;
+      align-items: start;
+    }
+
+    .insight-panel {
+      min-height: 126px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 252, 246, 0.72);
+    }
+
+    .insight-panel h2,
+    .insight-panel h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .insight-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .insight-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: baseline;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .insight-row span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .insight-row strong {
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .priority-callout {
+      display: grid;
+      gap: 8px;
+    }
+
+    .priority-callout .lead {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .action-panel {
+      margin-bottom: 22px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 252, 246, 0.78);
+    }
+
+    .action-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .action-header h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .action-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .action-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .action-item:first-child {
+      border-top: 0;
+    }
+
+    .action-main {
+      min-width: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .action-main strong,
+    .action-main span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .action-meta {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .table-wrap {
+      max-width: 100%;
+      overflow-x: hidden;
+      overflow-y: visible;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .table-wrap::-webkit-scrollbar {
+      display: none;
+    }
+
+    .table-scroll-hint {
+      display: none;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table-wrap.is-scrollable + .table-scroll-hint {
+      display: block;
+    }
+
+    .horizontal-scroll-dock {
+      position: fixed;
+      left: 280px;
+      right: 0;
+      bottom: 0;
+      z-index: 35;
+      display: none;
+      height: 48px;
+      padding: 10px 30px 12px;
+      border: 0;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+      background: var(--bg);
+      box-shadow: 0 -14px 36px rgba(31, 42, 36, 0.12);
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-color: var(--accent) #e7dfd1;
+      scrollbar-width: auto;
+    }
+
+    .horizontal-scroll-dock.visible {
+      display: block;
+    }
+
+    .horizontal-scroll-dock::-webkit-scrollbar {
+      height: 18px;
+    }
+
+    .horizontal-scroll-dock::-webkit-scrollbar-track {
+      background: #e7dfd1;
+      border-radius: 999px;
+    }
+
+    .horizontal-scroll-dock::-webkit-scrollbar-thumb {
+      background: var(--accent);
+      border: 4px solid #e7dfd1;
+      border-radius: 999px;
+    }
+
+    .horizontal-scroll-inner {
+      height: 2px;
+      width: 100%;
+    }
+
+    .notification-toast {
+      position: fixed;
+      right: 30px;
+      bottom: 52px;
+      z-index: 60;
+      max-width: min(520px, calc(100vw - 60px));
+      padding: 12px 14px;
+      border: 1px solid rgba(47, 111, 94, 0.2);
+      border-radius: 12px;
+      background: rgba(47, 111, 94, 0.96);
+      color: #fff;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+      transition: opacity 180ms ease, transform 180ms ease;
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .notification-toast.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .notification-toast.error {
+      border-color: rgba(150, 54, 48, 0.22);
+      background: rgba(150, 54, 48, 0.96);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1120px;
+    }
+
+    th, td {
+      padding: 14px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f0ede6;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+    }
+
+    tr {
+      transition: background 140ms ease;
+    }
+
+    tbody tr:hover {
+      background: #f8f2e8;
+    }
+
+    .job-title {
+      max-width: 330px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .job-title strong {
+      font-size: 15px;
+      line-height: 1.3;
+    }
+
+    .company-highlight {
+      width: fit-content;
+      max-width: 100%;
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .drawer-company {
+      width: fit-content;
+      max-width: 100%;
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .score {
+      display: inline-flex;
+      min-width: 46px;
+      height: 30px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .score.low {
+      background: #f3e2d4;
+      color: var(--warn);
+    }
+
+    .score.very-low {
+      background: #f3d9d9;
+      color: var(--danger);
+    }
+
+    .tags {
+      max-width: 260px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .source-pill {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .source-pill.demo {
+      background: #f0ede6;
+      color: var(--muted);
+    }
+
+    .link-missing {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .row-actions {
+      min-width: 240px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .mini-actions {
+      min-width: 190px;
+      display: grid;
+      gap: 8px;
+    }
+
+    button {
+      min-height: 38px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: white;
+      padding: 0 14px;
+      cursor: pointer;
+      transition: transform 140ms ease, background 140ms ease, opacity 140ms ease;
+    }
+
+    .secondary-button {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--line);
+    }
+
+    .secondary-button:hover {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      background: #265c4e;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.58;
+      transform: none;
+    }
+
+    .empty {
+      display: none;
+      padding: 44px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: rgba(255, 252, 246, 0.6);
+    }
+
+    .empty.visible { display: block; }
+
+    .drawer {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none;
+      visibility: hidden;
+    }
+
+    .demo-modal {
+      z-index: 90;
+    }
+
+    .demo-modal.visible {
+      pointer-events: auto !important;
+      visibility: visible;
+    }
+
+    .demo-modal:not(.visible) .drawer-panel {
+      opacity: 0;
+      transform: translate(-50%, -44%) scale(0.94);
+    }
+
+    .demo-modal.visible .drawer-backdrop {
+      pointer-events: auto;
+    }
+
+    .demo-modal.visible .drawer-panel,
+    .demo-modal.visible .demo-option,
+    .demo-modal.visible .demo-actions button,
+    .demo-modal.visible .demo-reset input {
+      pointer-events: auto;
+    }
+
+    body.modal-open {
+      overflow: hidden;
+    }
+
+    body.modal-open .horizontal-scroll-dock {
+      display: none !important;
+    }
+
+    body.demo-choice-required .shell {
+      pointer-events: none;
+      user-select: none;
+    }
+
+    body.demo-choice-required .demo-modal,
+    body.demo-choice-required .demo-modal * {
+      pointer-events: auto;
+    }
+
+    .drawer.visible {
+      pointer-events: auto;
+      visibility: visible;
+    }
+
+    .drawer-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(31, 42, 36, 0.22);
+      opacity: 0;
+      transition: opacity 180ms ease;
+    }
+
+    .drawer.visible .drawer-backdrop {
+      opacity: 1;
+    }
+
+    .drawer-panel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: min(720px, 100vw);
+      height: 100%;
+      overflow: auto;
+      padding: 28px;
+      background: var(--panel);
+      border-left: 1px solid var(--line);
+      box-shadow: -24px 0 70px rgba(31, 42, 36, 0.16);
+      transform: translateX(100%);
+      transition: transform 210ms ease;
+    }
+
+    .drawer.visible .drawer-panel {
+      transform: translateX(0);
+    }
+
+
+    .demo-modal .drawer-backdrop {
+      background: rgba(31, 42, 36, 0.30);
+      backdrop-filter: blur(5px);
+    }
+
+    .demo-modal .drawer-panel {
+      top: 50%;
+      left: 50%;
+      right: auto;
+      z-index: 92;
+      width: min(900px, calc(100vw - 48px));
+      height: auto;
+      max-height: min(820px, calc(100vh - 48px));
+      border-left: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: 0 30px 90px rgba(31, 42, 36, 0.24);
+      opacity: 0;
+      transform: translate(-50%, -44%) scale(0.94);
+      transition: transform 210ms ease, opacity 160ms ease;
+    }
+
+    .demo-modal.visible .drawer-panel {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .drawer-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: start;
+      margin-bottom: 24px;
+    }
+
+    .drawer-title {
+      display: grid;
+      gap: 8px;
+    }
+
+    .drawer-title h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.15;
+    }
+
+    .drawer-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    .drawer-field {
+      display: grid;
+      gap: 6px;
+      padding: 0 0 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .drawer-field.wide {
+      grid-column: 1 / -1;
+    }
+
+    .drawer-field.highlight,
+    .drawer-field.skill-must,
+    .drawer-field.skill-nice,
+    .drawer-field.skill-have,
+    .drawer-field.gap-block,
+    .drawer-field.gap-learn,
+    .drawer-field.gap-bonus,
+    .drawer-field.matching {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 252, 246, 0.86);
+    }
+
+    .drawer-field.highlight {
+      border-left: 4px solid var(--accent);
+      background: #f8f2e8;
+    }
+
+    .drawer-field.skill-must {
+      border-color: #ead3ad;
+      background: #fff5e6;
+    }
+
+    .drawer-field.skill-nice {
+      border-color: #cfe2f3;
+      background: #eef6ff;
+    }
+
+    .drawer-field.skill-have {
+      border-color: #cbe6d2;
+      background: #edf7ef;
+    }
+
+    .drawer-field.gap-block {
+      border-color: #e9c4c4;
+      background: #fff0f0;
+    }
+
+    .drawer-field.gap-learn {
+      border-color: #eadc9c;
+      background: #fff8df;
+    }
+
+    .drawer-field.gap-bonus {
+      border-color: #d7d2f2;
+      background: #f1f0ff;
+    }
+
+    .drawer-field.matching {
+      border-color: #c9e3d8;
+      background: #eef7f3;
+    }
+
+    .drawer-field span {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .drawer-field strong,
+    .drawer-field p {
+      margin: 0;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .edit-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .edit-grid .wide {
+      grid-column: 1 / -1;
+    }
+
+    #researchPromptText,
+    #profileJsonText {
+      min-height: 360px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    #profileJsonText {
+      min-height: 520px;
+    }
+
+    .fit-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .fit-toggle input {
+      width: auto;
+      min-height: 0;
+    }
+
+    body.view-compact .analysis-col,
+    body.view-compact .full-col,
+    body.view-analysis .full-col {
+      display: none;
+    }
+
+    body.fit-table table {
+      min-width: 0;
+      table-layout: fixed;
+    }
+
+    body.fit-table th,
+    body.fit-table td {
+      padding: 10px 10px;
+      font-size: 12px;
+      word-break: break-word;
+    }
+
+    .bars {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bar-row {
+      display: grid;
+      gap: 6px;
+    }
+
+    .bar-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+    }
+
+    .bar-track {
+      height: 7px;
+      border-radius: 99px;
+      background: #e5dfd3;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      width: 0;
+      background: var(--accent);
+      transition: width 360ms ease;
+    }
+
+    .fade-in {
+      animation: fadeIn 360ms ease both;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1180px) and (min-width: 921px) {
+      .toolbar {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .fit-toggle {
+        min-height: 42px;
+        align-content: end;
+      }
+
+      .insights {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 920px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        position: relative;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      main {
+        padding: 20px 20px 96px;
+      }
+
+      .horizontal-scroll-dock {
+        left: 0;
+        right: 0;
+        padding-left: 20px;
+        padding-right: 20px;
+      }
+
+      .notification-toast {
+        left: 20px;
+        right: 20px;
+        max-width: none;
+      }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .quick-actions .hint {
+        width: 100%;
+        margin-left: 0;
+      }
+
+      .demo-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .insights {
+        grid-template-columns: 1fr;
+      }
+
+      .drawer-grid,
+      .edit-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <h1>JobMeta Dashboard</h1>
+        <div class="muted small">Lokale Jobdatenbank, Matching-Score und Bewerbungsnotizen.</div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Überblick</div>
+        <div class="metric-list">
+          <div class="metric"><span>Jobs</span><strong id="metricTotal">0</strong></div>
+          <div class="metric"><span>Score 70+</span><strong id="metricStrong">0</strong></div>
+          <div class="metric"><span>Remote</span><strong id="metricRemote">0</strong></div>
+          <div class="metric"><span>Offen</span><strong id="metricOpen">0</strong></div>
+          <div class="metric"><span>Prio hoch</span><strong id="metricHighPriority">0</strong></div>
+          <div class="metric"><span>Mit Frist</span><strong id="metricDeadlines">0</strong></div>
+          <div class="metric"><span>Aktionen</span><strong id="metricActions">0</strong></div>
+          <div class="metric"><span>Mit Link</span><strong id="metricLinks">0</strong></div>
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Quellen</div>
+        <div class="bars" id="sourceBars"></div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Echte Daten</div>
+        <div class="side-stack">
+          <select id="harvestMode">
+            <option value="profile">Profilbasiert</option>
+            <option value="manual">Manuell</option>
+            <option value="broad">Breit</option>
+          </select>
+          <input id="harvestQuery" type="text" placeholder="Manuelle Suchbegriffe, z. B. metadata, python">
+          <select id="harvestSource">
+            <option value="all">Alle erlaubten Quellen</option>
+            <option value="arbeitnow">Arbeitnow</option>
+            <option value="remotive">Remotive</option>
+          </select>
+          <select id="harvestLimit">
+            <option value="50">50 pro Quelle</option>
+            <option value="100">100 pro Quelle</option>
+            <option value="250">250 pro Quelle</option>
+            <option value="500">500 pro Quelle</option>
+          </select>
+          <button id="harvestButton">Echte Jobs abrufen</button>
+          <div class="muted small" id="harvestModeHint">Profilbasiert nutzt Begriffe aus deiner lokalen Profil-JSON. LinkedIn, StepStone und Indeed laufen weiterhin über CSV-Import oder manuellen Import.</div>
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Profil</div>
+        <div class="side-stack">
+          <input id="cvFile" type="file" accept=".pdf,.txt,text/plain,application/pdf">
+          <button id="importCvButton" class="secondary-button">Profil aus CV laden</button>
+          <button id="editProfileButton" class="secondary-button">Profil-JSON bearbeiten</button>
+          <div class="muted small">Aktualisiert dein lokales Matching-Profil und bewertet vorhandene Jobs neu.</div>
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">CSV-Import</div>
+        <div class="side-stack">
+          <input id="csvFile" type="file" accept=".csv,text/csv" multiple>
+          <button id="importCsvButton">CSV importieren</button>
+          <button id="copyPromptButton" class="secondary-button">Recherche-Prompt kopieren</button>
+          <button id="editPromptButton" class="secondary-button">Recherche-Prompt bearbeiten</button>
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Manuell</div>
+        <div class="side-stack">
+          <button id="openManualButton">Job einfügen</button>
+          <div class="muted small">Text aus einer Anzeige kopieren, grob erkennen lassen und als Datensatz speichern.</div>
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Spalten</div>
+        <div class="check-list" id="columnChooser">
+          <label><input type="checkbox" data-column-toggle="source" checked> Quelle</label>
+          <label><input type="checkbox" data-column-toggle="location" checked> Ort</label>
+          <label><input type="checkbox" data-column-toggle="skills" checked> Skills</label>
+          <label><input type="checkbox" data-column-toggle="gaps" checked> Lücken</label>
+          <label><input type="checkbox" data-column-toggle="entry" checked> Einstieg</label>
+          <label><input type="checkbox" data-column-toggle="signals" checked> Signale</label>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <div class="quick-actions fade-in">
+        <button id="topDemoButton">Demo-Daten laden</button>
+        <button id="topHarvestButton">Echte Jobs abrufen</button>
+        <button id="topImportButton" class="secondary-button">CSV importieren</button>
+        <button id="topCvButton" class="secondary-button">Profil aus CV laden</button>
+        <button id="topProfileButton" class="secondary-button">Profil bearbeiten</button>
+        <button id="topManualButton" class="secondary-button">Job einfügen</button>
+        <button id="topPromptButton" class="secondary-button">Prompt bearbeiten</button>
+        <button id="exportCsvButton" class="secondary-button">CSV herunterladen</button>
+        <span class="hint">Alles bleibt lokal in deiner SQLite-Datenbank.</span>
+      </div>
+
+      <div class="toolbar fade-in">
+        <label>
+          Suche
+          <input id="searchInput" type="search" placeholder="Titel, Firma, Tags, Notizen">
+        </label>
+        <label>
+          Status
+          <select id="statusFilter">
+            <option value="">Alle</option>
+            <option value="open">Offen</option>
+            <option value="interesting">Interessant</option>
+            <option value="applied">Beworben</option>
+            <option value="interviewing">Gespräch</option>
+            <option value="rejected">Absage</option>
+            <option value="ignored">Ignoriert</option>
+          </select>
+        </label>
+        <label>
+          Quelle
+          <select id="sourceFilter">
+            <option value="">Alle</option>
+          </select>
+        </label>
+        <label>
+          Mindestscore
+          <select id="scoreFilter">
+            <option value="0">Alle</option>
+            <option value="50">50+</option>
+            <option value="70">70+</option>
+            <option value="85">85+</option>
+          </select>
+        </label>
+        <label>
+          Priorität
+          <select id="priorityFilter">
+            <option value="">Alle</option>
+            <option value="hoch">Hoch</option>
+            <option value="mittel">Mittel</option>
+            <option value="niedrig">Niedrig</option>
+          </select>
+        </label>
+        <label>
+          Workflow
+          <select id="workflowFilter">
+            <option value="">Alle</option>
+            <option value="actionable">Nächste Aktion</option>
+            <option value="overdue">Überfällig</option>
+            <option value="due7">Diese Woche</option>
+            <option value="high">Hohe Prio</option>
+          </select>
+        </label>
+        <label>
+          Ansicht
+          <select id="viewMode">
+            <option value="compact">Kompakt</option>
+            <option value="analysis">Analyse</option>
+            <option value="full">Volltabelle</option>
+          </select>
+        </label>
+        <label class="fit-toggle">
+          <input id="fitTable" type="checkbox">
+          Tabelle einpassen
+        </label>
+      </div>
+
+      <div class="status-line">
+        <span id="resultCount">Lade Jobs ...</span>
+        <span id="saveState">Bereit</span>
+      </div>
+
+      <section class="action-panel fade-in" id="actionPanel">
+        <div class="action-header">
+          <h2>Nächste Schritte</h2>
+          <span class="muted small" id="actionContext">Jobs mit Priorität, Frist oder nächster Aktion.</span>
+        </div>
+        <div class="action-list" id="actionList"></div>
+      </section>
+
+      <section class="insights fade-in" id="insightsPanel">
+        <div class="insight-panel priority-callout">
+          <h2>Lernpriorität</h2>
+          <div class="lead" id="topPriority">Noch keine Daten</div>
+          <div class="muted small" id="priorityContext">Importiere echte Jobs, um wiederkehrende Skill-Lücken zu sehen.</div>
+        </div>
+        <div class="insight-panel">
+          <h3>Blockierende Lücken</h3>
+          <div class="insight-list" id="blockingInsights"></div>
+        </div>
+        <div class="insight-panel">
+          <h3>Schnell lernbar</h3>
+          <div class="insight-list" id="learnableInsights"></div>
+        </div>
+        <div class="insight-panel">
+          <h3>Tools / Systeme</h3>
+          <div class="insight-list" id="toolInsights"></div>
+        </div>
+      </section>
+
+      <div id="emptyState" class="empty">
+        Keine Jobs in der Datenbank.
+        <br>
+        Importiere eine CSV oder rufe echte Jobs über die erlaubten Quellen ab.
+        <div class="empty-actions">
+          <button id="emptyImportButton" class="secondary-button">CSV importieren</button>
+          <button id="emptyHarvestButton" class="secondary-button">Jobs abrufen</button>
+        </div>
+      </div>
+
+      <div class="table-wrap fade-in" id="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Score</th>
+              <th>Job</th>
+              <th class="col-source">Quelle</th>
+              <th class="col-location">Ort</th>
+              <th class="analysis-col col-skills">Muss/Kann</th>
+              <th class="analysis-col col-gaps">Lücken</th>
+              <th class="analysis-col col-entry">Einstieg</th>
+              <th class="full-col">Aufgaben</th>
+              <th class="full-col">Tools</th>
+              <th class="full-col">Branche</th>
+              <th class="full-col">Entscheidung</th>
+              <th class="col-signals">Signale</th>
+              <th>Status und Notizen</th>
+            </tr>
+          </thead>
+          <tbody id="jobsBody"></tbody>
+        </table>
+      </div>
+      <div class="table-scroll-hint" id="tableScrollHint">
+        Tipp: Die feste Leiste am unteren Fensterrand scrollt die Tabelle horizontal.
+      </div>
+    </main>
+  </div>
+
+  <div class="horizontal-scroll-dock" id="horizontalScrollDock" aria-label="Tabelle horizontal scrollen">
+    <div class="horizontal-scroll-inner" id="horizontalScrollInner"></div>
+  </div>
+  <div class="notification-toast" id="notificationToast" role="status" aria-live="polite"></div>
+
+  <section class="drawer demo-modal" id="demoDrawer" aria-hidden="true">
+    <div class="drawer-backdrop" id="demoBackdrop"></div>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="demoTitle">
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <h2 id="demoTitle">Demo-Daten laden</h2>
+          <div class="muted">Wähle ein Demo-Profil und einen Recherche-Snapshot. Die Daten werden lokal importiert und bewertet.</div>
+        </div>
+        <button id="closeDemoButton" class="secondary-button">Schließen</button>
+      </div>
+      <div class="demo-notice" id="demoNotice">
+        Recherche-Snapshots wurden am 2026-06-21 KI-gestützt aus öffentlicher Websuche und sichtbaren Trefferseiten strukturiert. Große Jobplattformen werden nicht automatisiert gecrawlt. Links können veralten und dienen nur Demo-Zwecken.
+      </div>
+      <div class="demo-grid">
+        <div class="demo-column">
+          <h3>1. Demo-Lebenslauf</h3>
+          <div id="demoProfileOptions"></div>
+        </div>
+        <div class="demo-column">
+          <h3>2. Recherche-Snapshot</h3>
+          <div id="demoDatasetOptions"></div>
+        </div>
+      </div>
+      <div class="demo-actions">
+        <button id="loadDemoButton">Demo laden</button>
+        <label class="demo-reset">
+          <input id="resetDemoJobs" type="checkbox" checked>
+          vorherige Demo-Jobs entfernen
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section class="drawer" id="detailDrawer" aria-hidden="true">
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <h2 id="drawerTitle">Jobdetails</h2>
+          <div class="muted" id="drawerCompany"></div>
+          <a id="drawerLink" href="#" target="_blank" rel="noreferrer">Anzeige öffnen</a>
+        </div>
+        <button id="closeDrawerButton" class="secondary-button">Schließen</button>
+      </div>
+      <div id="drawerContent"></div>
+    </div>
+  </section>
+
+  <section class="drawer" id="manualDrawer" aria-hidden="true">
+    <div class="drawer-backdrop" id="manualBackdrop"></div>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="manualTitle">
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <h2 id="manualTitle">Job einfügen</h2>
+          <div class="muted">Anzeige kopieren, erkennen lassen, Felder prüfen, speichern.</div>
+        </div>
+        <button id="closeManualButton" class="secondary-button">Schließen</button>
+      </div>
+      <div class="edit-grid">
+        <label class="wide">Anzeigentext
+          <textarea id="manualPaste" placeholder="Kopiere hier den Text einer Stellenanzeige oder eines Suchergebnisses hinein."></textarea>
+        </label>
+        <button id="parseManualButton" class="secondary-button">Aus Text vorbereiten</button>
+      </div>
+      <div class="edit-grid">
+        <label>Quelle
+          <input id="manualSource" value="manual" placeholder="z. B. LinkedIn, StepStone, Indeed">
+        </label>
+        <label>URL
+          <input id="manualUrl" placeholder="https://...">
+        </label>
+        <label>Unternehmen
+          <input id="manualCompany" placeholder="Firma">
+        </label>
+        <label>Jobtitel
+          <input id="manualTitleField" placeholder="Titel">
+        </label>
+        <label>Ort / Remote / Start
+          <input id="manualLocation" placeholder="Hamburg / Remote / ab sofort">
+        </label>
+        <label>Rollencluster
+          <input id="manualRoleCluster" placeholder="Technical Writing / Wissensmanagement">
+        </label>
+        <label>Priorität
+          <select id="manualPriority">
+            <option value="">Noch offen</option>
+            <option value="hoch">Hoch</option>
+            <option value="mittel">Mittel</option>
+            <option value="niedrig">Niedrig</option>
+          </select>
+        </label>
+        <label>Bewerbungsfrist
+          <input id="manualDeadline" type="date">
+        </label>
+        <label class="wide">Nächste Aktion
+          <input id="manualNextAction" placeholder="z. B. Anzeige prüfen, Lebenslauf anpassen">
+        </label>
+        <label class="wide">Hauptaufgaben
+          <textarea id="manualTasks" placeholder="Kurz zusammenfassen"></textarea>
+        </label>
+        <label class="wide">Muss-Skills
+          <textarea id="manualMustSkills" placeholder="Muss-Anforderungen"></textarea>
+        </label>
+        <label class="wide">Kann-Skills
+          <textarea id="manualNiceSkills" placeholder="Kann-Anforderungen"></textarea>
+        </label>
+        <label class="wide">Notiz
+          <textarea id="manualNotes" placeholder="Eigene erste Einschätzung"></textarea>
+        </label>
+        <button id="saveManualButton">Job speichern</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="drawer" id="promptDrawer" aria-hidden="true">
+    <div class="drawer-backdrop" id="promptBackdrop"></div>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="promptTitle">
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <h2 id="promptTitle">Recherche-Prompt bearbeiten</h2>
+          <div class="muted">Passe Suchbegriff, Spalten oder Bewertungslogik an und kopiere den Prompt danach.</div>
+        </div>
+        <button id="closePromptButton" class="secondary-button">Schließen</button>
+      </div>
+      <div class="edit-grid">
+        <label class="wide">Prompt
+          <textarea id="researchPromptText" placeholder="Recherche-Prompt"></textarea>
+        </label>
+        <button id="copyEditedPromptButton">Prompt kopieren</button>
+        <button id="resetPromptButton" class="secondary-button">Standard wiederherstellen</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="drawer" id="profileDrawer" aria-hidden="true">
+    <div class="drawer-backdrop" id="profileBackdrop"></div>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <h2 id="profileTitle">Profil-JSON bearbeiten</h2>
+          <div class="muted">Manuelle Feinarbeit am Matching-Profil. Speichern bewertet die vorhandenen Jobs neu.</div>
+        </div>
+        <button id="closeProfileButton" class="secondary-button">Schließen</button>
+      </div>
+      <div class="edit-grid">
+        <label class="wide">config/profile.json
+          <textarea id="profileJsonText" spellcheck="false" placeholder='{"positive_keywords": {...}}'></textarea>
+        </label>
+        <button id="saveProfileButton">Profil speichern</button>
+        <button id="reloadProfileButton" class="secondary-button">Neu laden</button>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const statusOptions = ["", "interesting", "applied", "interviewing", "rejected", "ignored"];
+    const statusLabels = {
+      "": "Offen",
+      interesting: "Interessant",
+      applied: "Beworben",
+      interviewing: "Gespräch",
+      rejected: "Absage",
+      ignored: "Ignoriert"
+    };
+    let jobs = [];
+    let analytics = {};
+    let demoOptions = { profiles: [], datasets: [] };
+    let selectedDemoProfile = "information_management";
+    let selectedDemoDataset = "information_management";
+    const isForcedDemoMode = window.location.pathname.replace(/\/$/, "") === "/demo";
+    let forcedDemoSatisfied = !isForcedDemoMode;
+
+    function setDemoChoiceLock(locked) {
+      document.body.classList.toggle("demo-choice-required", Boolean(locked));
+      const shell = document.querySelector(".shell");
+      if (shell) {
+        if (locked) {
+          shell.setAttribute("inert", "");
+          shell.setAttribute("aria-hidden", "true");
+        } else {
+          shell.removeAttribute("inert");
+          shell.removeAttribute("aria-hidden");
+        }
+      }
+    }
+
+    const els = {
+      body: document.getElementById("jobsBody"),
+      resultCount: document.getElementById("resultCount"),
+      saveState: document.getElementById("saveState"),
+      notificationToast: document.getElementById("notificationToast"),
+      emptyState: document.getElementById("emptyState"),
+      tableWrap: document.getElementById("tableWrap"),
+      horizontalScrollDock: document.getElementById("horizontalScrollDock"),
+      horizontalScrollInner: document.getElementById("horizontalScrollInner"),
+      topDemoButton: document.getElementById("topDemoButton"),
+      searchInput: document.getElementById("searchInput"),
+      statusFilter: document.getElementById("statusFilter"),
+      sourceFilter: document.getElementById("sourceFilter"),
+      scoreFilter: document.getElementById("scoreFilter"),
+      priorityFilter: document.getElementById("priorityFilter"),
+      workflowFilter: document.getElementById("workflowFilter"),
+      viewMode: document.getElementById("viewMode"),
+      fitTable: document.getElementById("fitTable"),
+      harvestMode: document.getElementById("harvestMode"),
+      harvestQuery: document.getElementById("harvestQuery"),
+      harvestSource: document.getElementById("harvestSource"),
+      harvestLimit: document.getElementById("harvestLimit"),
+      harvestModeHint: document.getElementById("harvestModeHint"),
+      harvestButton: document.getElementById("harvestButton"),
+      topHarvestButton: document.getElementById("topHarvestButton"),
+      topImportButton: document.getElementById("topImportButton"),
+      topCvButton: document.getElementById("topCvButton"),
+      topProfileButton: document.getElementById("topProfileButton"),
+      topManualButton: document.getElementById("topManualButton"),
+      topPromptButton: document.getElementById("topPromptButton"),
+      exportCsvButton: document.getElementById("exportCsvButton"),
+      demoDrawer: document.getElementById("demoDrawer"),
+      demoBackdrop: document.getElementById("demoBackdrop"),
+      closeDemoButton: document.getElementById("closeDemoButton"),
+      demoNotice: document.getElementById("demoNotice"),
+      demoProfileOptions: document.getElementById("demoProfileOptions"),
+      demoDatasetOptions: document.getElementById("demoDatasetOptions"),
+      loadDemoButton: document.getElementById("loadDemoButton"),
+      resetDemoJobs: document.getElementById("resetDemoJobs"),
+      emptyImportButton: document.getElementById("emptyImportButton"),
+      emptyHarvestButton: document.getElementById("emptyHarvestButton"),
+      csvFile: document.getElementById("csvFile"),
+      cvFile: document.getElementById("cvFile"),
+      importCsvButton: document.getElementById("importCsvButton"),
+      importCvButton: document.getElementById("importCvButton"),
+      editProfileButton: document.getElementById("editProfileButton"),
+      copyPromptButton: document.getElementById("copyPromptButton"),
+      editPromptButton: document.getElementById("editPromptButton"),
+      openManualButton: document.getElementById("openManualButton"),
+      promptDrawer: document.getElementById("promptDrawer"),
+      promptBackdrop: document.getElementById("promptBackdrop"),
+      closePromptButton: document.getElementById("closePromptButton"),
+      researchPromptText: document.getElementById("researchPromptText"),
+      copyEditedPromptButton: document.getElementById("copyEditedPromptButton"),
+      resetPromptButton: document.getElementById("resetPromptButton"),
+      profileDrawer: document.getElementById("profileDrawer"),
+      profileBackdrop: document.getElementById("profileBackdrop"),
+      closeProfileButton: document.getElementById("closeProfileButton"),
+      profileJsonText: document.getElementById("profileJsonText"),
+      saveProfileButton: document.getElementById("saveProfileButton"),
+      reloadProfileButton: document.getElementById("reloadProfileButton"),
+      manualDrawer: document.getElementById("manualDrawer"),
+      manualBackdrop: document.getElementById("manualBackdrop"),
+      closeManualButton: document.getElementById("closeManualButton"),
+      manualPaste: document.getElementById("manualPaste"),
+      parseManualButton: document.getElementById("parseManualButton"),
+      manualSource: document.getElementById("manualSource"),
+      manualUrl: document.getElementById("manualUrl"),
+      manualCompany: document.getElementById("manualCompany"),
+      manualTitleField: document.getElementById("manualTitleField"),
+      manualLocation: document.getElementById("manualLocation"),
+      manualRoleCluster: document.getElementById("manualRoleCluster"),
+      manualPriority: document.getElementById("manualPriority"),
+      manualDeadline: document.getElementById("manualDeadline"),
+      manualNextAction: document.getElementById("manualNextAction"),
+      manualTasks: document.getElementById("manualTasks"),
+      manualMustSkills: document.getElementById("manualMustSkills"),
+      manualNiceSkills: document.getElementById("manualNiceSkills"),
+      manualNotes: document.getElementById("manualNotes"),
+      saveManualButton: document.getElementById("saveManualButton"),
+      columnChooser: document.getElementById("columnChooser"),
+      detailDrawer: document.getElementById("detailDrawer"),
+      drawerBackdrop: document.getElementById("drawerBackdrop"),
+      closeDrawerButton: document.getElementById("closeDrawerButton"),
+      drawerTitle: document.getElementById("drawerTitle"),
+      drawerCompany: document.getElementById("drawerCompany"),
+      drawerLink: document.getElementById("drawerLink"),
+      drawerContent: document.getElementById("drawerContent"),
+      topPriority: document.getElementById("topPriority"),
+      priorityContext: document.getElementById("priorityContext"),
+      actionContext: document.getElementById("actionContext"),
+      actionList: document.getElementById("actionList"),
+      blockingInsights: document.getElementById("blockingInsights"),
+      learnableInsights: document.getElementById("learnableInsights"),
+      toolInsights: document.getElementById("toolInsights"),
+      metricTotal: document.getElementById("metricTotal"),
+      metricStrong: document.getElementById("metricStrong"),
+      metricRemote: document.getElementById("metricRemote"),
+      metricOpen: document.getElementById("metricOpen"),
+      metricHighPriority: document.getElementById("metricHighPriority"),
+      metricDeadlines: document.getElementById("metricDeadlines"),
+      metricActions: document.getElementById("metricActions"),
+      metricLinks: document.getElementById("metricLinks"),
+      sourceBars: document.getElementById("sourceBars")
+    };
+
+    const fieldLabels = {
+      application_status: "Status",
+      decision: "Entscheidung",
+      interest: "Interesse",
+      entry_realistic: "Einstieg realistisch",
+      growth_value: "Wachstumswert",
+      priority: "Priorität",
+      application_deadline: "Bewerbungsfrist",
+      next_action: "Nächste Aktion",
+      url: "Anzeigenlink",
+      notes: "Notiz"
+    };
+
+    let saveStateTimer = null;
+    let toastTimer = null;
+    let syncingTableScroll = false;
+
+    function currentTimeLabel() {
+      return new Intl.DateTimeFormat("de-DE", {
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(new Date());
+    }
+
+    function showNotification(message, tone = "ok") {
+      window.clearTimeout(toastTimer);
+      els.notificationToast.textContent = message;
+      els.notificationToast.classList.toggle("error", tone === "error");
+      els.notificationToast.classList.add("visible");
+      toastTimer = window.setTimeout(() => {
+        els.notificationToast.classList.remove("visible");
+      }, 3600);
+    }
+
+    function setSaveState(message, tone = "ok", resetAfter = 2200, notify = false) {
+      window.clearTimeout(saveStateTimer);
+      els.saveState.textContent = message;
+      els.saveState.classList.toggle("is-saving", tone === "saving");
+      els.saveState.classList.toggle("is-error", tone === "error");
+      if (notify) {
+        showNotification(message, tone);
+      }
+      if (resetAfter) {
+        saveStateTimer = window.setTimeout(() => {
+          els.saveState.textContent = "Bereit";
+          els.saveState.classList.remove("is-saving", "is-error");
+        }, resetAfter);
+      }
+    }
+
+    function changedFieldLabels(job, fields) {
+      return Object.entries(fields)
+        .filter(([key, value]) => String(job?.[key] || "") !== String(value || ""))
+        .map(([key]) => fieldLabels[key] || key);
+    }
+
+    function updateTableScrollHint() {
+      if (!els.tableWrap) return;
+      const isVisible = els.tableWrap.style.display !== "none";
+      const isScrollable = isVisible && els.tableWrap.scrollWidth > els.tableWrap.clientWidth + 4;
+      els.tableWrap.classList.toggle("is-scrollable", isScrollable);
+      els.horizontalScrollDock.classList.toggle("visible", isScrollable);
+      if (isScrollable) {
+        els.horizontalScrollInner.style.width = `${els.tableWrap.scrollWidth}px`;
+        els.horizontalScrollDock.scrollLeft = els.tableWrap.scrollLeft;
+      }
+    }
+
+    function syncTableScrollFromDock() {
+      if (syncingTableScroll) return;
+      syncingTableScroll = true;
+      els.tableWrap.scrollLeft = els.horizontalScrollDock.scrollLeft;
+      syncingTableScroll = false;
+    }
+
+    function syncDockScrollFromTable() {
+      if (syncingTableScroll) return;
+      syncingTableScroll = true;
+      els.horizontalScrollDock.scrollLeft = els.tableWrap.scrollLeft;
+      syncingTableScroll = false;
+    }
+
+    async function loadJobs() {
+      const response = await fetch("/api/jobs");
+      const payload = await response.json();
+      jobs = payload.jobs || [];
+      await loadAnalytics();
+      hydrateSourceFilter();
+      render();
+    }
+
+    async function loadAnalytics() {
+      const response = await fetch("/api/analytics");
+      const payload = await response.json();
+      analytics = payload.analytics || {};
+    }
+
+    async function loadDemoOptions() {
+      const response = await fetch("/api/demo-options");
+      const payload = await response.json();
+      demoOptions = payload || { profiles: [], datasets: [] };
+      renderDemoOptions();
+    }
+
+    function renderDemoOptions() {
+      els.demoNotice.textContent = demoOptions.notice || "Demo-Daten sind neutrale Beispieldaten.";
+      const profileKeys = new Set((demoOptions.profiles || []).map(option => option.key));
+      const datasetKeys = new Set((demoOptions.datasets || []).map(option => option.key));
+      if (!profileKeys.has(selectedDemoProfile)) selectedDemoProfile = (demoOptions.profiles?.[0]?.key || "");
+      if (!datasetKeys.has(selectedDemoDataset)) selectedDemoDataset = (demoOptions.datasets?.[0]?.key || "");
+      els.demoProfileOptions.innerHTML = renderDemoOptionGroup("profile", demoOptions.profiles, selectedDemoProfile);
+      els.demoDatasetOptions.innerHTML = renderDemoOptionGroup("dataset", demoOptions.datasets, selectedDemoDataset);
+    }
+
+    function renderDemoOptionGroup(kind, options, selectedKey) {
+      return (options || []).map(option => {
+        const selected = option.key === selectedKey ? " selected" : "";
+        const pressed = option.key === selectedKey ? "true" : "false";
+        return `
+          <button type="button" class="demo-option${selected}" data-demo-kind="${kind}" data-demo-key="${escapeAttr(option.key)}" aria-pressed="${pressed}">
+            <strong>${escapeHtml(option.label)}</strong>
+            <span>${escapeHtml(option.description || "")}</span>
+            <span>${escapeHtml(option.filename || "")}</span>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function selectDemoOption(event) {
+      const button = event.target.closest("[data-demo-kind][data-demo-key]");
+      if (!button) return;
+      if (button.dataset.demoKind === "profile") {
+        selectedDemoProfile = button.dataset.demoKey;
+      } else if (button.dataset.demoKind === "dataset") {
+        selectedDemoDataset = button.dataset.demoKey;
+      }
+      renderDemoOptions();
+    }
+
+    async function openDemo() {
+      if (!demoOptions.profiles.length || !demoOptions.datasets.length) {
+        await loadDemoOptions();
+      }
+      const locked = isForcedDemoMode && !forcedDemoSatisfied;
+      setDemoChoiceLock(locked);
+      document.body.classList.add("modal-open");
+      els.demoDrawer.classList.add("visible");
+      els.demoDrawer.setAttribute("aria-hidden", "false");
+    }
+
+    function hideDemoDrawer() {
+      els.demoDrawer.classList.remove("visible");
+      els.demoDrawer.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("modal-open");
+      setDemoChoiceLock(false);
+    }
+
+    function closeDemo() {
+      if (isForcedDemoMode && !forcedDemoSatisfied) {
+        setSaveState("Bitte zuerst Demo-Profil und Recherche-Snapshot laden", "saving", 2800, true);
+        return;
+      }
+      hideDemoDrawer();
+    }
+
+    function enableDemoInteractionAfterLoad() {
+      forcedDemoSatisfied = true;
+      hideDemoDrawer();
+      [
+        "topHarvestButton", "topImportButton", "topCvButton", "topProfileButton",
+        "topManualButton", "topPromptButton", "exportCsvButton",
+        "harvestButton", "importCsvButton", "importCvButton", "editProfileButton",
+        "openManualButton", "copyPromptButton", "editPromptButton", "emptyHarvestButton",
+        "emptyImportButton", "loadDemoButton"
+      ].forEach((key) => {
+        if (els[key]) els[key].disabled = false;
+      });
+      updateHarvestModeUi();
+    }
+
+    async function loadSelectedDemo() {
+      const profileKey = selectedDemoProfile;
+      const datasetKey = selectedDemoDataset;
+      if (!profileKey || !datasetKey) {
+        setSaveState("Bitte Demo-Profil und Demo-Jobdatensatz auswählen", "error", 2800, true);
+        return;
+      }
+      els.loadDemoButton.disabled = true;
+      setSaveState("Lade Demo-Profil und Demo-Jobs ...", "saving", null);
+      try {
+        const response = await fetch("/api/load-demo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            profile_key: profileKey,
+            dataset_key: datasetKey,
+            reset_demo: els.resetDemoJobs.checked
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          setSaveState(payload.error || "Demo konnte nicht geladen werden", "error", 3600, true);
+          return;
+        }
+        jobs = payload.jobs || jobs;
+        await loadAnalytics();
+        hydrateSourceFilter();
+        render();
+        const stats = payload.stats || {};
+        const deleted = payload.deleted_demo_jobs || 0;
+        const signals = (payload.signals || []).slice(0, 4).join(", ");
+        setSaveState(
+          `Demo geladen: ${payload.profile_label} + ${payload.dataset_label} · ${stats.new || 0} neu, ${stats.updated || 0} aktualisiert${deleted ? `, ${deleted} Demo-Jobs entfernt` : ""}${signals ? ` · ${signals}` : ""}`,
+          "ok",
+          5600,
+          true
+        );
+        enableDemoInteractionAfterLoad();
+      } catch (error) {
+        setSaveState("Demo konnte nicht geladen werden", "error", 3600, true);
+      } finally {
+        els.loadDemoButton.disabled = false;
+      }
+    }
+
+    function hydrateSourceFilter() {
+      const sources = [...new Set(jobs.map(job => job.source).filter(Boolean))].sort();
+      els.sourceFilter.innerHTML = '<option value="">Alle</option>' + sources
+        .map(source => `<option value="${escapeHtml(source)}">${escapeHtml(source)}</option>`)
+        .join("");
+    }
+
+    function render() {
+      renderMetrics();
+      renderAnalytics();
+      renderActions();
+      const filtered = filteredJobs();
+      els.resultCount.textContent = `${filtered.length} von ${jobs.length} Jobs`;
+      els.emptyState.classList.toggle("visible", jobs.length === 0);
+      els.tableWrap.style.display = jobs.length === 0 ? "none" : "block";
+      els.body.innerHTML = filtered.map(renderRow).join("");
+      attachRowHandlers();
+      window.requestAnimationFrame(updateTableScrollHint);
+    }
+
+    function filteredJobs() {
+      const query = els.searchInput.value.trim().toLowerCase();
+      const status = els.statusFilter.value;
+      const source = els.sourceFilter.value;
+      const minScore = Number(els.scoreFilter.value || 0);
+      const priority = els.priorityFilter.value;
+      const workflow = els.workflowFilter.value;
+
+      const filtered = jobs.filter(job => {
+        const haystack = [
+          job.title,
+          job.company,
+          job.location,
+          job.tags,
+          job.keywords_found,
+          job.match_reason,
+          job.role_cluster,
+          job.industry,
+          job.main_tasks,
+          job.tools_systems,
+          job.must_skills,
+          job.nice_to_have,
+          job.already_have,
+          job.gap_blocking,
+          job.gap_learnable,
+          job.gap_bonus,
+          job.decision,
+          job.priority,
+          job.application_deadline,
+          job.next_action,
+          job.notes
+        ].join(" ").toLowerCase();
+        const jobStatus = job.application_status || "";
+        const statusMatch = status === "" || (status === "open" ? jobStatus === "" : jobStatus === status);
+        const priorityMatch = !priority || normalizePriority(job.priority) === priority;
+        return (!query || haystack.includes(query))
+          && statusMatch
+          && (!source || job.source === source)
+          && priorityMatch
+          && workflowMatch(job, workflow)
+          && Number(job.match_score || 0) >= minScore;
+      });
+      if (workflow) {
+        filtered.sort(compareWorkflowJobs);
+      }
+      return filtered;
+    }
+
+    function renderMetrics() {
+      const total = jobs.length;
+      els.metricTotal.textContent = total;
+      els.metricStrong.textContent = jobs.filter(job => Number(job.match_score) >= 70).length;
+      els.metricRemote.textContent = jobs.filter(job => job.remote === 1).length;
+      els.metricOpen.textContent = jobs.filter(job => !job.application_status).length;
+      els.metricHighPriority.textContent = jobs.filter(job => normalizePriority(job.priority) === "hoch").length;
+      els.metricDeadlines.textContent = jobs.filter(job => Boolean(job.application_deadline)).length;
+      els.metricActions.textContent = upcomingJobs().length;
+      els.metricLinks.textContent = jobs.filter(job => Boolean(job.url)).length;
+      renderSourceBars();
+    }
+
+    function renderAnalytics() {
+      const priority = (analytics.learning_priorities || [])[0];
+      els.topPriority.textContent = priority ? priority.label : "Noch keine Daten";
+      els.priorityContext.textContent = priority
+        ? `${priority.count} gewichtete Treffer aus Muss-Skills und schnell lernbaren Lücken.`
+        : "Importiere echte Jobs, um wiederkehrende Skill-Lücken zu sehen.";
+      els.blockingInsights.innerHTML = insightRows(analytics.blocking_gaps || []);
+      els.learnableInsights.innerHTML = insightRows(analytics.learnable_gaps || []);
+      els.toolInsights.innerHTML = insightRows(analytics.tools || []);
+    }
+
+    function insightRows(items) {
+      if (!items.length) {
+        return '<div class="muted small">Noch keine wiederkehrenden Signale.</div>';
+      }
+      return items.slice(0, 5).map(item => `<div class="insight-row">
+        <span title="${escapeAttr(item.label)}">${escapeHtml(item.label)}</span>
+        <strong>${escapeHtml(String(item.count))}</strong>
+      </div>`).join("");
+    }
+
+    function renderActions() {
+      const actions = upcomingJobs().slice(0, 5);
+      els.actionContext.textContent = actions.length
+        ? `${actions.length} wichtigste offene Schritte.`
+        : "Setze Priorität, Frist oder nächste Aktion in den Jobdetails.";
+      els.actionList.innerHTML = actions.length
+        ? actions.map(job => `<div class="action-item">
+            <div class="action-main">
+              <strong>${escapeHtml(job.title || "Ohne Titel")}</strong>
+              <span class="action-meta">${escapeHtml(actionLabel(job))}</span>
+            </div>
+            <button class="secondary-button" data-action-job="${escapeAttr(job.job_key)}">Details</button>
+          </div>`).join("")
+        : '<div class="muted small">Noch keine geplanten Bewerbungsaktionen.</div>';
+      els.actionList.querySelectorAll("[data-action-job]").forEach(button => {
+        button.addEventListener("click", () => openDetails(button.dataset.actionJob));
+      });
+    }
+
+    function upcomingJobs() {
+      return jobs
+        .filter(job => !["rejected", "ignored"].includes(job.application_status || ""))
+        .filter(job => workflowMatch(job, "actionable"))
+        .sort(compareWorkflowJobs);
+    }
+
+    function actionLabel(job) {
+      const parts = [];
+      const state = deadlineState(job);
+      if (state.label) parts.push(state.label);
+      if (job.priority) parts.push(`Prio: ${job.priority}`);
+      if (job.next_action) parts.push(job.next_action);
+      if (job.company) parts.push(job.company);
+      return parts.join(" | ");
+    }
+
+    function workflowMatch(job, filter) {
+      if (!filter) return true;
+      const state = deadlineState(job);
+      if (filter === "overdue") return state.kind === "overdue";
+      if (filter === "due7") return ["overdue", "today", "soon"].includes(state.kind);
+      if (filter === "high") return normalizePriority(job.priority) === "hoch";
+      if (filter === "actionable") {
+        return Boolean(job.next_action)
+          || ["overdue", "today", "soon"].includes(state.kind)
+          || normalizePriority(job.priority) === "hoch";
+      }
+      return true;
+    }
+
+    function compareWorkflowJobs(a, b) {
+      return workflowRank(a) - workflowRank(b)
+        || Number(b.match_score || 0) - Number(a.match_score || 0)
+        || String(a.title || "").localeCompare(String(b.title || ""));
+    }
+
+    function workflowRank(job) {
+      const state = deadlineState(job);
+      const deadlineRank = { overdue: 0, today: 1, soon: 2, later: 5, "": 6 }[state.kind] ?? 6;
+      const priorityRank = { hoch: 0, mittel: 2, niedrig: 4 }[normalizePriority(job.priority)] ?? 3;
+      const actionRank = job.next_action ? 0 : 2;
+      return deadlineRank * 10 + priorityRank + actionRank;
+    }
+
+    function deadlineState(job) {
+      if (!job.application_deadline) return { kind: "", label: "" };
+      const deadline = parseDateOnly(job.application_deadline);
+      if (!deadline) return { kind: "later", label: `Frist: ${job.application_deadline}` };
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((deadline - today) / 86400000);
+      if (diffDays < 0) return { kind: "overdue", label: `Überfällig: ${job.application_deadline}` };
+      if (diffDays === 0) return { kind: "today", label: `Heute fällig: ${job.application_deadline}` };
+      if (diffDays <= 7) return { kind: "soon", label: `Frist in ${diffDays} Tagen: ${job.application_deadline}` };
+      return { kind: "later", label: `Frist: ${job.application_deadline}` };
+    }
+
+    function parseDateOnly(value) {
+      const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return null;
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      date.setHours(0, 0, 0, 0);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function renderSourceBars() {
+      const counts = new Map();
+      jobs.forEach(job => counts.set(job.source || "unknown", (counts.get(job.source || "unknown") || 0) + 1));
+      const max = Math.max(1, ...counts.values());
+      els.sourceBars.innerHTML = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([source, count]) => {
+        const width = Math.round((count / max) * 100);
+        return `<div class="bar-row">
+          <div class="bar-meta"><span>${escapeHtml(source)}</span><strong>${count}</strong></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${width}%"></div></div>
+        </div>`;
+      }).join("") || '<div class="muted small">Noch keine Quellen.</div>';
+    }
+
+    function workflowSummary(job) {
+      const parts = [];
+      if (job.priority) parts.push(`Prio: ${job.priority}`);
+      if (job.application_deadline) parts.push(`Frist: ${job.application_deadline}`);
+      if (job.next_action) parts.push(`Nächste Aktion: ${job.next_action}`);
+      return parts.join(" | ");
+    }
+
+    function sourceLabel(job) {
+      const source = job.source || "unknown";
+      if (source === "sample") return "Demo";
+      if (source === "manual" || source === "csv") return "Import";
+      if (["arbeitnow", "remotive"].includes(source)) return "Live-API";
+      return "Quelle";
+    }
+
+    function linkMarkup(job) {
+      if (!job.url) {
+        return '<span class="link-missing">Kein Link hinterlegt</span>';
+      }
+      if (!isLikelyDirectJobUrl(job.url)) {
+        return '<span class="link-missing">Suchlink eingetragen, direkten Anzeigenlink ergänzen</span>';
+      }
+      return `<a href="${escapeAttr(job.url)}" target="_blank" rel="noreferrer">Anzeige öffnen</a>`;
+    }
+
+    function isLikelyDirectJobUrl(url) {
+      const lower = String(url || "").trim().toLowerCase();
+      if (!lower) return false;
+      if (isLikelySearchUrl(lower)) return false;
+      if (lower.includes("xing.com/jobs/")) {
+        return /\/jobs\/[^?#]*-\d{5,}/.test(lower);
+      }
+      return true;
+    }
+
+    function isLikelySearchUrl(url) {
+      const lower = String(url || "").trim().toLowerCase();
+      return lower.includes("keywords=")
+        || lower.includes("radius=")
+        || lower.includes("/jobs/search")
+        || lower.includes("/jobs?q=")
+        || lower.includes("jobs-in-");
+    }
+
+    function normalizePriority(value) {
+      const text = String(value || "").trim().toLowerCase();
+      if (["hoch", "high", "wichtig"].includes(text)) return "hoch";
+      if (["mittel", "medium", "normal"].includes(text)) return "mittel";
+      if (["niedrig", "low", "spaeter", "später"].includes(text)) return "niedrig";
+      return text;
+    }
+
+    function priorityOptions(current) {
+      const normalized = normalizePriority(current);
+      const options = [
+        ["", "Noch offen"],
+        ["hoch", "Hoch"],
+        ["mittel", "Mittel"],
+        ["niedrig", "Niedrig"]
+      ];
+      const custom = current && !options.some(([value]) => value === normalized)
+        ? `<option value="${escapeAttr(current)}" selected>${escapeHtml(current)}</option>`
+        : "";
+      return custom + options.map(([value, label]) =>
+        `<option value="${value}" ${value === normalized ? "selected" : ""}>${label}</option>`
+      ).join("");
+    }
+
+    function renderRow(job) {
+      const score = Number(job.match_score || 0);
+      const scoreClass = score < 35 ? "very-low" : score < 60 ? "low" : "";
+      const workflow = workflowSummary(job);
+      return `<tr data-key="${escapeHtml(job.job_key)}">
+        <td><span class="score ${scoreClass}">${score}</span></td>
+        <td>
+          <div class="job-title">
+            <strong>${escapeHtml(job.title)}</strong>
+            <span class="company-highlight">${escapeHtml(job.company || "Unbekannter Arbeitgeber")}</span>
+            ${linkMarkup(job)}
+          </div>
+        </td>
+        <td class="col-source"><span class="source-pill ${job.source === "sample" ? "demo" : ""}">${escapeHtml(sourceLabel(job))}</span><br><span class="muted small">${escapeHtml(job.source || "")}</span><br><span class="muted small">gesehen: ${escapeHtml(String(job.seen_count || 0))}</span></td>
+        <td class="col-location">${escapeHtml(job.location)}<br><span class="muted small">${job.remote === 1 ? "Remote" : "Vor Ort / unklar"}</span></td>
+        <td class="analysis-col col-skills">
+          <div class="tags"><strong>Muss:</strong> ${escapeHtml(job.must_skills || "")}</div>
+          <div class="tags"><strong>Kann:</strong> ${escapeHtml(job.nice_to_have || "")}</div>
+        </td>
+        <td class="analysis-col col-gaps">
+          <div class="tags"><strong>A:</strong> ${escapeHtml(job.gap_blocking || "")}</div>
+          <div class="tags"><strong>B:</strong> ${escapeHtml(job.gap_learnable || "")}</div>
+          <div class="tags"><strong>C:</strong> ${escapeHtml(job.gap_bonus || "")}</div>
+        </td>
+        <td class="analysis-col col-entry">
+          <div class="tags">${escapeHtml(job.entry_realistic || "")}</div>
+          <div class="tags">${escapeHtml(job.growth_value || "")}</div>
+          <div class="tags">${escapeHtml(job.interest || "")}</div>
+        </td>
+        <td class="full-col"><div class="tags">${escapeHtml(job.main_tasks || "")}</div></td>
+        <td class="full-col"><div class="tags">${escapeHtml(job.tools_systems || "")}</div></td>
+        <td class="full-col"><div class="tags">${escapeHtml(job.industry || "")}</div></td>
+        <td class="full-col"><div class="tags">${escapeHtml(job.decision || "")}</div></td>
+        <td class="col-signals">
+          <div class="tags">${escapeHtml(job.match_reason || "")}</div>
+          <div class="tags">${escapeHtml(job.keywords_found || "")}</div>
+        </td>
+        <td>
+          <div class="mini-actions">
+            <select data-field="status">
+              ${statusOptions.map(value => `<option value="${value}" ${value === (job.application_status || "") ? "selected" : ""}>${statusLabels[value]}</option>`).join("")}
+            </select>
+            <div class="tags">${workflow || "Keine nächste Aktion"}</div>
+            <button data-action="save">Speichern</button>
+            <button data-action="details" class="secondary-button">Details</button>
+          </div>
+        </td>
+      </tr>`;
+    }
+
+    function attachRowHandlers() {
+      document.querySelectorAll('[data-action="save"]').forEach(button => {
+        button.addEventListener("click", async event => {
+          const row = event.target.closest("tr");
+          const jobKey = row.dataset.key;
+          const status = row.querySelector('[data-field="status"]').value;
+          await saveJob(jobKey, { application_status: status }, event.target);
+        });
+      });
+      document.querySelectorAll('[data-action="details"]').forEach(button => {
+        button.addEventListener("click", event => {
+          const row = event.target.closest("tr");
+          openDetails(row.dataset.key);
+        });
+      });
+      applyColumnVisibility();
+    }
+
+    async function saveJob(jobKey, fields, button) {
+      const job = jobs.find(item => item.job_key === jobKey);
+      const changedLabels = changedFieldLabels(job, fields);
+      if (changedLabels.length === 0) {
+        setSaveState("Keine Änderungen erkannt", "ok", 1600, true);
+        return;
+      }
+      button.disabled = true;
+      setSaveState("Speichere ...", "saving", null);
+      let response;
+      try {
+        response = await fetch(`/api/jobs/${encodeURIComponent(jobKey)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fields)
+        });
+      } catch (error) {
+        setSaveState("Speichern fehlgeschlagen", "error", 2400, true);
+        button.disabled = false;
+        return;
+      }
+      if (!response.ok) {
+        setSaveState("Speichern fehlgeschlagen", "error", 2400, true);
+        button.disabled = false;
+        return;
+      }
+      if (job) {
+        Object.assign(job, fields);
+      }
+      const fieldText = changedLabels.slice(0, 4).join(", ");
+      const moreText = changedLabels.length > 4 ? ` +${changedLabels.length - 4}` : "";
+      setSaveState(`Gespeichert: ${fieldText}${moreText} · ${currentTimeLabel()}`, "ok", 3200, true);
+      button.disabled = false;
+      renderMetrics();
+    }
+
+    function openDetails(jobKey) {
+      const job = jobs.find(item => item.job_key === jobKey);
+      if (!job) return;
+      els.drawerTitle.textContent = job.title || "Jobdetails";
+      els.drawerCompany.innerHTML = `<span class="drawer-company">${escapeHtml(job.company || "Unbekannter Arbeitgeber")}</span>`;
+      if (job.url && isLikelyDirectJobUrl(job.url)) {
+        els.drawerLink.href = job.url;
+        els.drawerLink.textContent = "Anzeige öffnen";
+        els.drawerLink.style.display = "";
+      } else if (job.url) {
+        els.drawerLink.removeAttribute("href");
+        els.drawerLink.textContent = "Suchlink erkannt: bitte direkten Anzeigenlink unten eintragen";
+        els.drawerLink.style.display = "";
+      } else {
+        els.drawerLink.removeAttribute("href");
+        els.drawerLink.textContent = "Kein Link hinterlegt";
+        els.drawerLink.style.display = "";
+      }
+      els.drawerContent.innerHTML = renderDrawer(job);
+      els.detailDrawer.classList.add("visible");
+      els.detailDrawer.setAttribute("aria-hidden", "false");
+      const saveButton = els.drawerContent.querySelector('[data-drawer-action="save"]');
+      saveButton.addEventListener("click", async () => {
+        await saveJob(job.job_key, {
+          application_status: els.drawerContent.querySelector('[data-drawer-field="application_status"]').value,
+          decision: els.drawerContent.querySelector('[data-drawer-field="decision"]').value,
+          interest: els.drawerContent.querySelector('[data-drawer-field="interest"]').value,
+          entry_realistic: els.drawerContent.querySelector('[data-drawer-field="entry_realistic"]').value,
+          growth_value: els.drawerContent.querySelector('[data-drawer-field="growth_value"]').value,
+          priority: els.drawerContent.querySelector('[data-drawer-field="priority"]').value,
+          application_deadline: els.drawerContent.querySelector('[data-drawer-field="application_deadline"]').value,
+          next_action: els.drawerContent.querySelector('[data-drawer-field="next_action"]').value,
+          url: els.drawerContent.querySelector('[data-drawer-field="url"]').value,
+          notes: els.drawerContent.querySelector('[data-drawer-field="notes"]').value
+        }, saveButton);
+        render();
+        openDetails(job.job_key);
+      });
+    }
+
+    function closeDetails() {
+      els.detailDrawer.classList.remove("visible");
+      els.detailDrawer.setAttribute("aria-hidden", "true");
+    }
+
+    function openManual() {
+      els.manualDrawer.classList.add("visible");
+      els.manualDrawer.setAttribute("aria-hidden", "false");
+      els.manualPaste.focus();
+    }
+
+    function closeManual() {
+      els.manualDrawer.classList.remove("visible");
+      els.manualDrawer.setAttribute("aria-hidden", "true");
+    }
+
+    function parseManualText() {
+      const text = els.manualPaste.value.trim();
+      const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      const urlMatch = text.match(/https?:\/\/\S+/i);
+      const title = findLine(lines, ["jobtitel", "title", "stelle"]) || lines[0] || "";
+      const company = findLine(lines, ["unternehmen", "firma", "company"]) || lines[1] || "";
+      const location = findLine(lines, ["ort", "location", "standort"]) || guessLocation(text);
+      if (urlMatch && !els.manualUrl.value) els.manualUrl.value = urlMatch[0].replace(/[),.;]+$/, "");
+      if (!els.manualTitleField.value) els.manualTitleField.value = stripLabel(title);
+      if (!els.manualCompany.value) els.manualCompany.value = stripLabel(company);
+      if (!els.manualLocation.value) els.manualLocation.value = stripLabel(location);
+      if (!els.manualTasks.value) els.manualTasks.value = summarizeLines(lines.slice(2, 8));
+      if (!els.manualMustSkills.value) els.manualMustSkills.value = findSection(text, ["anforderungen", "qualifikation", "profil", "must"]);
+      if (!els.manualNiceSkills.value) els.manualNiceSkills.value = findSection(text, ["nice", "wunsch", "bonus", "von vorteil"]);
+      if (!els.manualSource.value || els.manualSource.value === "manual") els.manualSource.value = guessSource(text);
+      setSaveState("Text vorbereitet", "ok", 1800, true);
+    }
+
+    async function saveManualJob() {
+      const record = {
+        source: els.manualSource.value || "manual",
+        url: els.manualUrl.value,
+        company: els.manualCompany.value,
+        title: els.manualTitleField.value,
+        location_remote_start: els.manualLocation.value,
+        location: els.manualLocation.value,
+        role_cluster: els.manualRoleCluster.value,
+        priority: els.manualPriority.value,
+        application_deadline: els.manualDeadline.value,
+        next_action: els.manualNextAction.value,
+        main_tasks: els.manualTasks.value,
+        must_skills: els.manualMustSkills.value,
+        nice_to_have: els.manualNiceSkills.value,
+        notes: els.manualNotes.value,
+        description: els.manualPaste.value
+      };
+      if (!record.title || !record.company) {
+        setSaveState("Titel und Unternehmen fehlen", "error", 2400, true);
+        return;
+      }
+      els.saveManualButton.disabled = true;
+      setSaveState("Speichere manuellen Job ...", "saving", null);
+      const response = await fetch("/api/manual-job", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record })
+      });
+      const payload = await response.json();
+      jobs = payload.jobs || jobs;
+      await loadAnalytics();
+      hydrateSourceFilter();
+      render();
+      const stats = payload.stats || {};
+      setSaveState(`Job gespeichert: ${stats.new || 0} neu, ${stats.updated || 0} aktualisiert`, "ok", 3200, true);
+      els.saveManualButton.disabled = false;
+      closeManual();
+      clearManualForm();
+    }
+
+    function clearManualForm() {
+      [
+        els.manualPaste,
+        els.manualUrl,
+        els.manualCompany,
+        els.manualTitleField,
+        els.manualLocation,
+        els.manualRoleCluster,
+        els.manualDeadline,
+        els.manualNextAction,
+        els.manualTasks,
+        els.manualMustSkills,
+        els.manualNiceSkills,
+        els.manualNotes
+      ].forEach(input => { input.value = ""; });
+      els.manualSource.value = "manual";
+      els.manualPriority.value = "";
+    }
+
+    function findLine(lines, labels) {
+      const match = lines.find(line => labels.some(label => line.toLowerCase().startsWith(label + ":")));
+      return match || "";
+    }
+
+    function stripLabel(value) {
+      return String(value || "").replace(/^[^:]{2,28}:\s*/, "").trim();
+    }
+
+    function guessLocation(text) {
+      const candidates = ["Remote", "Hybrid", "Hamburg", "Berlin", "Kiel", "Deutschland"];
+      return candidates.filter(item => text.toLowerCase().includes(item.toLowerCase())).join(" / ");
+    }
+
+    function guessSource(text) {
+      const lower = text.toLowerCase();
+      if (lower.includes("linkedin")) return "LinkedIn";
+      if (lower.includes("stepstone")) return "StepStone";
+      if (lower.includes("indeed")) return "Indeed";
+      if (lower.includes("xing")) return "XING";
+      return "manual";
+    }
+
+    function summarizeLines(lines) {
+      return lines.slice(0, 5).join("; ");
+    }
+
+    function findSection(text, labels) {
+      const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      const start = lines.findIndex(line => labels.some(label => line.toLowerCase().includes(label)));
+      if (start === -1) return "";
+      return lines.slice(start + 1, start + 6).join("; ");
+    }
+
+    function renderDrawer(job) {
+      return `<div class="drawer-grid">
+        ${drawerField("Score", job.match_score)}
+        ${drawerField("Quelle", `${job.source || ""} - gesehen: ${job.seen_count || 0}`)}
+        ${drawerField("Rollencluster", job.role_cluster)}
+        ${drawerField("Ort / Remote / Start", job.location_remote_start || job.location, false, "highlight")}
+        ${drawerField("Bewerbungsworkflow", workflowSummary(job), true)}
+        ${drawerField("Branche", job.industry)}
+        ${drawerField("Erfahrung", job.experience_required, false, "highlight")}
+        ${drawerField("Hauptaufgaben", job.main_tasks, true, "highlight")}
+        ${drawerField("Muster", job.work_pattern, true)}
+        ${drawerField("Tools / Systeme", job.tools_systems, true, "highlight")}
+        ${drawerField("Muss-Skills", job.must_skills, true, "skill-must")}
+        ${drawerField("Kann-Skills", job.nice_to_have, true, "skill-nice")}
+        ${drawerField("Kann ich schon?", job.already_have, true, "skill-have")}
+        ${drawerField("Lücken A blockierend", job.gap_blocking, true, "gap-block")}
+        ${drawerField("Lücken B schnell lernbar", job.gap_learnable, true, "gap-learn")}
+        ${drawerField("Lücken C Bonus", job.gap_bonus, true, "gap-bonus")}
+        ${drawerField("Matching", job.match_reason, true, "matching")}
+      </div>
+      <div class="edit-grid">
+        <label>Status
+          <select data-drawer-field="application_status">
+            ${statusOptions.map(value => `<option value="${value}" ${value === (job.application_status || "") ? "selected" : ""}>${statusLabels[value]}</option>`).join("")}
+          </select>
+        </label>
+        <label>Entscheidung
+          <input data-drawer-field="decision" value="${escapeAttr(job.decision || "")}" placeholder="z. B. beobachten / bewerben">
+        </label>
+        <label>Interesse
+          <input data-drawer-field="interest" value="${escapeAttr(job.interest || "")}" placeholder="hoch / mittel / niedrig">
+        </label>
+        <label>Einstieg realistisch
+          <input data-drawer-field="entry_realistic" value="${escapeAttr(job.entry_realistic || "")}" placeholder="Ja / Vielleicht / Später">
+        </label>
+        <label>Wachstumswert
+          <input data-drawer-field="growth_value" value="${escapeAttr(job.growth_value || "")}" placeholder="hoch / mittel / niedrig">
+        </label>
+        <label>Priorität
+          <select data-drawer-field="priority">
+            ${priorityOptions(job.priority || "")}
+          </select>
+        </label>
+        <label>Bewerbungsfrist
+          <input data-drawer-field="application_deadline" type="date" value="${escapeAttr(job.application_deadline || "")}">
+        </label>
+        <label class="wide">Anzeigenlink
+          <input data-drawer-field="url" value="${escapeAttr(job.url || "")}" placeholder="Direkten Link zur Stellenanzeige einfügen">
+        </label>
+        <label class="wide">Nächste Aktion
+          <input data-drawer-field="next_action" value="${escapeAttr(job.next_action || "")}" placeholder="Nächste Aktion einfügen">
+        </label>
+        <label class="wide">Notiz
+          <textarea data-drawer-field="notes" placeholder="Notiz einfügen">${escapeHtml(job.notes || "")}</textarea>
+        </label>
+        <button data-drawer-action="save">Detail speichern</button>
+      </div>`;
+    }
+
+    function drawerField(label, value, wide = false, tone = "") {
+      return `<div class="drawer-field ${wide ? "wide" : ""} ${tone}">
+        <span>${escapeHtml(label)}</span>
+        <p>${escapeHtml(value || "-")}</p>
+      </div>`;
+    }
+
+    async function harvestJobs() {
+      els.harvestButton.disabled = true;
+      els.topHarvestButton.disabled = true;
+      els.emptyHarvestButton.disabled = true;
+      setSaveState("Rufe Jobs ab ...", "saving", null);
+      const response = await fetch("/api/harvest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: els.harvestSource.value,
+          search_mode: els.harvestMode.value,
+          query: els.harvestQuery.value,
+          limit: Number(els.harvestLimit.value || 50)
+        })
+      });
+      const payload = await response.json();
+      jobs = payload.jobs || jobs;
+      await loadAnalytics();
+      hydrateSourceFilter();
+      render();
+      const stats = payload.stats || {};
+      const plan = payload.plan || {};
+      const queryInfo = plan.queries?.length
+        ? ` | Suche: ${plan.queries.slice(0, 4).join(", ")}${plan.queries.length > 4 ? " ..." : ""}`
+        : "";
+      if (payload.errors?.length) {
+        setSaveState(`Abruf teilweise fehlgeschlagen: ${payload.errors.join(" | ")}`, "error", 4200, true);
+      } else {
+        setSaveState(`Abruf fertig (${harvestModeLabel(plan.mode)}): ${stats.new || 0} neu, ${stats.updated || 0} aktualisiert${queryInfo}`, "ok", 4200, true);
+      }
+      els.harvestButton.disabled = false;
+      els.topHarvestButton.disabled = false;
+      els.emptyHarvestButton.disabled = false;
+    }
+
+    function harvestModeLabel(mode) {
+      if (mode === "profile") return "profilbasiert";
+      if (mode === "broad") return "breit";
+      return "manuell";
+    }
+
+    function updateHarvestModeUi() {
+      const mode = els.harvestMode.value;
+      els.harvestQuery.disabled = mode !== "manual";
+      if (mode === "profile") {
+        els.harvestModeHint.textContent = "Profilbasiert sucht mit den stärksten Begriffen aus deiner Profil-JSON und führt Dubletten zusammen.";
+      } else if (mode === "broad") {
+        els.harvestModeHint.textContent = "Breit ruft die Quellen ohne Suchbegriff ab und bewertet danach lokal mit deinem Profil.";
+      } else {
+        els.harvestModeHint.textContent = "Manuell nutzt genau die Suchbegriffe aus dem Eingabefeld, getrennt durch Kommas.";
+      }
+    }
+
+    async function loadSampleJobs() {
+      setSaveState("Lade Demo-Jobs ...", "saving", null);
+      const response = await fetch("/api/sample", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const payload = await response.json();
+      jobs = payload.jobs || jobs;
+      await loadAnalytics();
+      hydrateSourceFilter();
+      render();
+      const stats = payload.stats || {};
+      setSaveState(`Demo geladen: ${stats.new || 0} neu, ${stats.updated || 0} aktualisiert`, "ok", 2600, true);
+    }
+
+    async function importCsv() {
+      const files = [...els.csvFile.files];
+      if (!files.length) {
+        setSaveState("Bitte zuerst eine oder mehrere CSV-Dateien auswählen", "error", 2400, true);
+        return;
+      }
+      els.importCsvButton.disabled = true;
+      els.topImportButton.disabled = true;
+      els.emptyImportButton.disabled = true;
+      const totals = { incoming: 0, new: 0, updated: 0, duplicates: 0 };
+      try {
+        for (let index = 0; index < files.length; index += 1) {
+          const file = files[index];
+          setSaveState(`Importiere CSV ${index + 1} von ${files.length}: ${file.name}`, "saving", null);
+          const csvText = await file.text();
+          const response = await fetch("/api/import-csv", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ csv_text: csvText })
+          });
+          const payload = await response.json();
+          jobs = payload.jobs || jobs;
+          const stats = payload.stats || {};
+          totals.incoming += Number(stats.incoming || 0);
+          totals.new += Number(stats.new || 0);
+          totals.updated += Number(stats.updated || 0);
+          totals.duplicates += Number(stats.duplicates || 0);
+        }
+        await loadAnalytics();
+        hydrateSourceFilter();
+        render();
+        setSaveState(`${files.length} CSV-Datei${files.length === 1 ? "" : "en"} importiert: ${totals.new} neu, ${totals.updated} aktualisiert, ${totals.duplicates} Dubletten`, "ok", 4200, true);
+      } catch (error) {
+        setSaveState("CSV-Import teilweise fehlgeschlagen", "error", 3600, true);
+      } finally {
+        els.importCsvButton.disabled = false;
+        els.topImportButton.disabled = false;
+        els.emptyImportButton.disabled = false;
+        els.csvFile.value = "";
+      }
+    }
+
+    async function importCvProfile() {
+      const file = els.cvFile.files[0];
+      if (!file) {
+        setSaveState("Bitte zuerst einen CV auswählen", "error", 2400, true);
+        return;
+      }
+      els.importCvButton.disabled = true;
+      els.topCvButton.disabled = true;
+      setSaveState("Lese CV und aktualisiere Profil ...", "saving", null);
+      try {
+        const contentBase64 = await fileToBase64(file);
+        const response = await fetch("/api/profile-from-cv", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          setSaveState(payload.error || "CV-Profil konnte nicht aktualisiert werden", "error", 3600, true);
+          return;
+        }
+        jobs = payload.jobs || jobs;
+        await loadAnalytics();
+        hydrateSourceFilter();
+        render();
+        const signals = (payload.signals || []).join(", ") || "Profilsignale erkannt";
+        setSaveState(`Profil aktualisiert: ${signals}. ${payload.rescored || 0} Jobs neu bewertet.`, "ok", 4200, true);
+      } catch (error) {
+        setSaveState("CV-Profil konnte nicht gelesen werden", "error", 3600, true);
+      } finally {
+        els.importCvButton.disabled = false;
+        els.topCvButton.disabled = false;
+        els.cvFile.value = "";
+      }
+    }
+
+    async function fileToBase64(file) {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      const chunkSize = 0x8000;
+      for (let index = 0; index < bytes.length; index += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+      }
+      return btoa(binary);
+    }
+
+    async function exportCsv() {
+      if (!jobs.length) {
+        setSaveState("Noch keine Jobs zum Exportieren", "error", 2400, true);
+        return;
+      }
+      els.exportCsvButton.disabled = true;
+      setSaveState("Erstelle CSV ...", "saving", null);
+      const response = await fetch("/api/export-csv");
+      if (!response.ok) {
+        setSaveState("CSV-Export fehlgeschlagen", "error", 3600, true);
+        els.exportCsvButton.disabled = false;
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "jobmeta-jobs.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setSaveState("CSV heruntergeladen", "ok", 2600, true);
+      els.exportCsvButton.disabled = false;
+    }
+
+    function defaultResearchPrompt() {
+      const query = els.harvestQuery.value || "Junior Informationsmanagement Remote Hamburg";
+      return `Suche aktuelle Stellenanzeigen zu "${query}". Erstelle eine CSV im JobMeta-Format mit exakt diesen Spalten:
+source,url,company,title,role_cluster,location_remote_start,industry,main_tasks,work_pattern,tools_systems,must_skills,nice_to_have,already_have,gap_blocking,gap_learnable,gap_bonus,experience_required,entry_realistic,growth_value,interest,decision,priority,application_deadline,next_action,notes,tags,date_posted
+
+Bitte nutze kurze, tabellentaugliche Inhalte. Unterscheide bei den Luecken:
+- gap_blocking: echte Ausschluss- oder starke Risikofaktoren
+- gap_learnable: schnell lernbare Anforderungen
+- gap_bonus: Entwicklungsfelder oder Bonuswissen
+
+Nutze bei url immer den direkten Link zur einzelnen Stellenanzeige, nicht den Link zu einer Suchergebnisseite. Lasse next_action und notes leer, weil diese Felder manuell im Dashboard gepflegt werden. Bewerte entry_realistic, growth_value, interest und priority knapp. Nutze application_deadline nur, wenn eine Frist klar genannt wird. Gib ausschliesslich CSV aus.`;
+    }
+
+    function ensurePromptText() {
+      if (!els.researchPromptText.value.trim()) {
+        els.researchPromptText.value = defaultResearchPrompt();
+      }
+    }
+
+    function openPromptEditor() {
+      ensurePromptText();
+      els.promptDrawer.classList.add("visible");
+      els.promptDrawer.setAttribute("aria-hidden", "false");
+      els.researchPromptText.focus();
+    }
+
+    function closePromptEditor() {
+      els.promptDrawer.classList.remove("visible");
+      els.promptDrawer.setAttribute("aria-hidden", "true");
+    }
+
+    async function openProfileEditor() {
+      els.profileDrawer.classList.add("visible");
+      els.profileDrawer.setAttribute("aria-hidden", "false");
+      await loadProfileJson();
+      els.profileJsonText.focus();
+    }
+
+    function closeProfileEditor() {
+      els.profileDrawer.classList.remove("visible");
+      els.profileDrawer.setAttribute("aria-hidden", "true");
+    }
+
+    async function loadProfileJson() {
+      setSaveState("Lade Profil ...", "saving", null);
+      const response = await fetch("/api/profile");
+      const payload = await response.json();
+      els.profileJsonText.value = JSON.stringify(payload.profile || {}, null, 2);
+      setSaveState("Profil geladen", "ok", 1800, true);
+    }
+
+    async function saveProfileJson() {
+      try {
+        JSON.parse(els.profileJsonText.value);
+      } catch (error) {
+        setSaveState(`JSON-Fehler: ${error.message}`, "error", 3600, true);
+        return;
+      }
+      els.saveProfileButton.disabled = true;
+      setSaveState("Speichere Profil und bewerte Jobs neu ...", "saving", null);
+      const response = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile_json: els.profileJsonText.value })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        setSaveState(payload.error || "Profil konnte nicht gespeichert werden", "error", 3600, true);
+        els.saveProfileButton.disabled = false;
+        return;
+      }
+      jobs = payload.jobs || jobs;
+      await loadAnalytics();
+      hydrateSourceFilter();
+      render();
+      setSaveState(`Profil gespeichert: ${payload.rescored || 0} Jobs neu bewertet`, "ok", 3600, true);
+      els.saveProfileButton.disabled = false;
+    }
+
+    function resetPrompt() {
+      els.researchPromptText.value = defaultResearchPrompt();
+      setSaveState("Standard-Prompt wiederhergestellt", "ok", 2200, true);
+    }
+
+    async function copyResearchPrompt() {
+      ensurePromptText();
+      const prompt = els.researchPromptText.value;
+      await navigator.clipboard.writeText(prompt);
+      setSaveState("Recherche-Prompt kopiert", "ok", 2200, true);
+    }
+
+    function applyViewMode() {
+      document.body.classList.remove("view-compact", "view-analysis", "view-full");
+      document.body.classList.add(`view-${els.viewMode.value}`);
+      document.body.classList.toggle("fit-table", els.fitTable.checked);
+      applyColumnVisibility();
+      window.requestAnimationFrame(updateTableScrollHint);
+    }
+
+    function applyColumnVisibility() {
+      document.querySelectorAll("[data-column-toggle]").forEach(toggle => {
+        document.querySelectorAll(`.col-${toggle.dataset.columnToggle}`).forEach(cell => {
+          cell.style.display = toggle.checked ? "" : "none";
+        });
+      });
+      window.requestAnimationFrame(updateTableScrollHint);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replaceAll("`", "&#096;");
+    }
+
+    [els.searchInput, els.statusFilter, els.sourceFilter, els.scoreFilter, els.priorityFilter, els.workflowFilter].forEach(control => {
+      control.addEventListener("input", render);
+      control.addEventListener("change", render);
+    });
+    els.viewMode.addEventListener("change", applyViewMode);
+    els.fitTable.addEventListener("change", applyViewMode);
+    els.topDemoButton.addEventListener("click", openDemo);
+    els.harvestMode.addEventListener("change", updateHarvestModeUi);
+    els.harvestButton.addEventListener("click", harvestJobs);
+    els.topHarvestButton.addEventListener("click", harvestJobs);
+    els.emptyHarvestButton.addEventListener("click", harvestJobs);
+    els.importCsvButton.addEventListener("click", importCsv);
+    els.topImportButton.addEventListener("click", () => els.csvFile.click());
+    els.emptyImportButton.addEventListener("click", () => els.csvFile.click());
+    els.csvFile.addEventListener("change", () => {
+      if (els.csvFile.files.length) importCsv();
+    });
+    els.importCvButton.addEventListener("click", () => els.cvFile.click());
+    els.topCvButton.addEventListener("click", () => els.cvFile.click());
+    els.cvFile.addEventListener("change", () => {
+      if (els.cvFile.files.length) importCvProfile();
+    });
+    els.editProfileButton.addEventListener("click", openProfileEditor);
+    els.topProfileButton.addEventListener("click", openProfileEditor);
+    els.saveProfileButton.addEventListener("click", saveProfileJson);
+    els.reloadProfileButton.addEventListener("click", loadProfileJson);
+    els.copyPromptButton.addEventListener("click", copyResearchPrompt);
+    els.editPromptButton.addEventListener("click", openPromptEditor);
+    els.topPromptButton.addEventListener("click", openPromptEditor);
+    els.copyEditedPromptButton.addEventListener("click", copyResearchPrompt);
+    els.resetPromptButton.addEventListener("click", resetPrompt);
+    els.openManualButton.addEventListener("click", openManual);
+    els.topManualButton.addEventListener("click", openManual);
+    els.exportCsvButton.addEventListener("click", exportCsv);
+    els.parseManualButton.addEventListener("click", parseManualText);
+    els.saveManualButton.addEventListener("click", saveManualJob);
+    els.columnChooser.querySelectorAll("[data-column-toggle]").forEach(toggle => {
+      toggle.addEventListener("change", applyColumnVisibility);
+    });
+    els.drawerBackdrop.addEventListener("click", closeDetails);
+    els.closeDrawerButton.addEventListener("click", closeDetails);
+    els.manualBackdrop.addEventListener("click", closeManual);
+    els.closeManualButton.addEventListener("click", closeManual);
+    els.promptBackdrop.addEventListener("click", closePromptEditor);
+    els.closePromptButton.addEventListener("click", closePromptEditor);
+    els.profileBackdrop.addEventListener("click", closeProfileEditor);
+    els.closeProfileButton.addEventListener("click", closeProfileEditor);
+    els.demoBackdrop.addEventListener("click", closeDemo);
+    els.closeDemoButton.addEventListener("click", closeDemo);
+    els.demoDrawer.querySelector(".drawer-panel").addEventListener("click", event => event.stopPropagation());
+    els.demoProfileOptions.addEventListener("click", selectDemoOption);
+    els.demoDatasetOptions.addEventListener("click", selectDemoOption);
+    els.loadDemoButton.addEventListener("click", loadSelectedDemo);
+    els.horizontalScrollDock.addEventListener("scroll", syncTableScrollFromDock);
+    els.tableWrap.addEventListener("scroll", syncDockScrollFromTable);
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") {
+        closeDetails();
+        closeManual();
+        closePromptEditor();
+        closeProfileEditor();
+        closeDemo();
+      }
+    });
+    window.addEventListener("resize", updateTableScrollHint);
+
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+      });
+    }
+
+    applyViewMode();
+    updateHarvestModeUi();
+    loadDemoOptions()
+      .then(() => { if (isForcedDemoMode) openDemo(); })
+      .catch(() => { if (isForcedDemoMode) openDemo(); });
+    loadJobs().catch(() => {
+      els.resultCount.textContent = "Dashboard konnte die Datenbank nicht laden.";
+    });
+  </script>
+</body>
+</html>
+"""

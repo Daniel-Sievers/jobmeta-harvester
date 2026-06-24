@@ -1,0 +1,69 @@
+Mira Beispiel
+Junior IT- und Informationsmanagement-Profil
+
+Kontakt
+Hamburg / Remote oder Hybrid
+mira.beispiel@example.org
+
+Profil
+Ich interessiere mich für Rollen an der Schnittstelle von IT-Support,
+Dokumentation, Datenqualität und Wissensmanagement. Besonders motiviert mich
+die strukturierte Aufbereitung von Informationen: Knowledge Base Artikel,
+technische Dokumentation, Metadaten, CSV/JSON-Daten, einfache SQL-Abfragen und
+nachvollziehbare Prüfregeln.
+
+Kernkompetenzen
+- Dokumentation und technische Dokumentation
+- Knowledge Base Pflege und Wissensmanagement
+- Informationsmanagement und Metadaten
+- Data Quality und regelbasierte Prüfung
+- CSV, JSON und Tabellenstrukturen
+- einfache SQL-Abfragen
+- Python-Grundlagen für kleine Automatisierungen
+- Git und GitHub für Projektverwaltung
+- Linux- und Terminal-Grundlagen
+- HTML, CSS und JavaScript-Grundlagen
+- Recherche, Klassifikation und strukturierte Notizen
+
+Projektbeispiele
+
+JobMeta Harvester
+- Lokales Python-Projekt zur strukturierten Jobsuche
+- CSV-Import, SQLite, Dashboard und Public-Export
+- Dokumentation von Datenmodell, Workflow und bekannten Grenzen
+- Fokus auf Datenqualität, Metadaten und Bewerbungsorganisation
+
+Knowledge Base Mini-Projekt
+- Beispielhafte Sammlung von Support-Artikeln strukturiert
+- wiederkehrende Fragen in Kategorien und Tags eingeordnet
+- Markdown-Dokumentation und README gepflegt
+
+Data Quality Check
+- CSV-Dateien auf fehlende Felder und unklare Werte geprüft
+- einfache Plausibilitätsregeln dokumentiert
+- Ergebnisse als kurze Qualitätsnotiz zusammengefasst
+
+Technische Grundlagen
+- Python: Dateien lesen, CSV/JSON verarbeiten, einfache Skripte
+- SQL: SELECT, WHERE, ORDER BY, einfache Aggregationen
+- Git/GitHub: Repositories, Commits, README, Issues
+- Linux/Terminal: Dateisystem, Befehle, lokale Entwicklungsumgebung
+- Web-Grundlagen: HTML, CSS, JavaScript
+
+Zielrollen
+- Junior Application Support Specialist
+- IT Support / Knowledge Base Assistant
+- Data Quality Analyst
+- Technical Documentation Assistant
+- Documentation Operations
+- Metadata / Taxonomy Assistant
+- Junior Data Steward
+- Content Operations mit technischem Bezug
+
+Was ich suche
+- Remote oder Hybrid bevorzugt
+- Hamburg oder Deutschland
+- Junior- oder Einstiegsrollen
+- Rollen mit Dokumentation, Datenqualität, Knowledge Base oder Systemverständnis
+- keine reinen Sales- oder Telefonakquise-Rollen
+- keine Senior-, Lead- oder Principal-Rollen

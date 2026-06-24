@@ -1,0 +1,83 @@
+Jonas Statistik
+Statistik- und Datenanalyse-Profil
+
+Kontakt
+Hamburg / Deutschland / Remote oder Hybrid
+jonas.statistik@example.org
+
+Profil
+Ich habe einen starken Schwerpunkt in Statistik, quantitativer Analyse,
+Datenanalyse und Reporting. Besonders interessiert mich die Verbindung von
+statistischen Methoden, Datenqualität und verständlicher Ergebnisdokumentation.
+Ich arbeite gerne mit strukturierten Daten, prüfe Datensätze auf Plausibilität
+und bereite Ergebnisse für Fachbereiche nachvollziehbar auf.
+
+Ausbildung
+M.Sc. Statistik und Datenanalyse
+Schwerpunkte:
+- deskriptive Statistik
+- Inferenzstatistik
+- Regressionsmodelle
+- quantitative Methoden
+- Umfragedaten und Stichproben
+- Datenvisualisierung
+- statistische Qualitätskontrolle
+
+Kernkompetenzen
+- Statistik und statistische Analyse
+- quantitative analysis und quantitative Methoden
+- Datenanalyse und Reporting
+- Datenqualität und Plausibilitätsprüfung
+- SQL für Auswertungen
+- Python-Grundlagen für Datenaufbereitung
+- RStudio für statistische Analysen
+- SPSS für Umfragedaten
+- Power BI für einfache Dashboards
+- CSV, Excel und tabellarische Daten
+- Dokumentation von Methoden und Ergebnissen
+- Recherche und verständliche Ergebnisaufbereitung
+
+Projektbeispiele
+
+Umfrageauswertung
+- Rohdaten aus einer Befragung bereinigt
+- fehlende Werte dokumentiert
+- Häufigkeiten, Kreuztabellen und einfache Regressionsmodelle berechnet
+- Ergebnisse als Bericht mit Diagrammen zusammengefasst
+
+Datenqualitätsbericht
+- CSV-Datensatz auf Ausreißer, fehlende Werte und unplausible Kategorien geprüft
+- Regeln für Plausibilitätsprüfung dokumentiert
+- Reporting-Tabelle für die wichtigsten Qualitätsprobleme erstellt
+
+Dashboard-Prototyp
+- Kennzahlen für ein fiktives Monitoring-Projekt definiert
+- Daten in Excel und Power BI visualisiert
+- Interpretation und Grenzen der Kennzahlen dokumentiert
+
+Technische Grundlagen
+- Python: pandas-Grundlagen, CSV-Dateien lesen, einfache Auswertungen
+- SQL: SELECT, WHERE, GROUP BY, ORDER BY, einfache Aggregationen
+- RStudio: Daten einlesen, deskriptive Statistik, einfache Modelle
+- SPSS: Umfragedaten auswerten und Variablen dokumentieren
+- Power BI: einfache Visualisierungen und Berichte
+- GitHub: Dokumentation und Projektablage
+
+Zielrollen
+- Junior Data Analyst
+- Junior Statistical Analyst
+- Data Quality Analyst
+- Reporting Analyst
+- Research Data Analyst
+- Junior Data Steward
+- Quantitative Research Assistant
+- Business Intelligence Assistant
+
+Was ich suche
+- Rollen mit Statistik, Datenanalyse, Reporting oder Datenqualität
+- Junior- oder Einstiegsrollen
+- Remote oder Hybrid bevorzugt
+- Hamburg oder Deutschland
+- verständliche Ergebnisdokumentation ist mir wichtig
+- keine reinen Sales- oder Akquise-Rollen
+- keine Senior-, Lead- oder Principal-Rollen

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobMeta Clipper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="panel">
+    <header class="header">
+      <div class="mark" aria-hidden="true">J</div>
+      <div>
+        <h1>JobMeta Clipper</h1>
+        <p>Aktuelle Anzeige an dein lokales Dashboard senden.</p>
+      </div>
+    </header>
+
+    <div id="status" class="status neutral">Bereit.</div>
+
+    <label>
+      Dashboard
+      <input id="endpoint" type="url" value="http://127.0.0.1:8765" autocomplete="off">
+    </label>
+
+    <div class="grid two">
+      <label>
+        Quelle
+        <input id="source" type="text" placeholder="z. B. LinkedIn">
+      </label>
+      <label>
+        Ort / Remote
+        <input id="location" type="text" placeholder="z. B. Hamburg / Remote">
+      </label>
+    </div>
+
+    <label>
+      Titel
+      <input id="title" type="text" placeholder="Jobtitel">
+    </label>
+
+    <label>
+      Unternehmen
+      <input id="company" type="text" placeholder="Arbeitgeber">
+    </label>
+
+    <label>
+      Anzeigenlink
+      <input id="url" type="url" placeholder="https://...">
+    </label>
+
+    <label>
+      Beschreibung / Auszug
+      <textarea id="description" rows="7" placeholder="Kurzer Auszug aus der Anzeige"></textarea>
+    </label>
+
+    <label>
+      Tags
+      <input id="tags" type="text" value="browser-extension, clipped" placeholder="kommagetrennte Tags">
+    </label>
+
+    <div class="actions">
+      <button id="extract" type="button">Seite auslesen</button>
+      <button id="send" type="button" class="primary">An JobMeta senden</button>
+    </div>
+    <div class="secondary-actions">
+      <button id="checkDashboard" type="button" class="ghost">Dashboard prüfen</button>
+      <button id="openDashboard" type="button" class="ghost">Dashboard öffnen</button>
+    </div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

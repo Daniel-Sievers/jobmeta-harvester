@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-label="JobMeta public export mockup">
+  <rect width="1200" height="760" fill="#f6f4ef"/>
+  <rect x="100" y="80" width="1000" height="600" rx="20" fill="#fffcf6" stroke="#ded9cf"/>
+  <text x="150" y="150" fill="#1f2a24" font-family="Arial, sans-serif" font-size="34" font-weight="700">Public-Export per CLI</text>
+  <text x="150" y="188" fill="#6d756f" font-family="Arial, sans-serif" font-size="18">Bereinigter Export für öffentliche Repositories</text>
+
+  <rect x="150" y="236" width="260" height="58" rx="12" fill="#2f6f5e"/>
+  <text x="280" y="272" fill="#fff" font-family="Arial, sans-serif" font-size="18" text-anchor="middle">Public-ZIP erzeugen</text>
+
+  <rect x="150" y="340" width="400" height="240" rx="14" fill="#eef6f2" stroke="#c9ded5"/>
+  <text x="180" y="384" fill="#1f2a24" font-family="Arial, sans-serif" font-size="22" font-weight="700">Bleibt im Paket</text>
+  <g fill="#1f2a24" font-family="Arial, sans-serif" font-size="18">
+    <text x="180" y="430">✓ Quellcode</text>
+    <text x="180" y="466">✓ Tests</text>
+    <text x="180" y="502">✓ Dokumentation</text>
+    <text x="180" y="538">✓ neutrale Demo-Daten</text>
+  </g>
+
+  <rect x="650" y="340" width="400" height="240" rx="14" fill="#fdeeee" stroke="#e7c4c0"/>
+  <text x="680" y="384" fill="#1f2a24" font-family="Arial, sans-serif" font-size="22" font-weight="700">Wird entfernt</text>
+  <g fill="#1f2a24" font-family="Arial, sans-serif" font-size="18">
+    <text x="680" y="430">× lokale SQLite-Datenbank</text>
+    <text x="680" y="466">× persönliche Notizen</text>
+    <text x="680" y="502">× Python-Cache-Dateien</text>
+    <text x="680" y="538">× private Profilgewichtungen</text>
+  </g>
+
+  <rect x="150" y="612" width="900" height="42" rx="21" fill="#2f6f5e" opacity="0.94"/>
+  <text x="600" y="639" fill="#fff" font-family="Arial, sans-serif" font-size="17" text-anchor="middle">jobmeta-harvester-public.zip wurde erstellt · bereit für GitHub-Review</text>
+</svg>
