@@ -7,9 +7,6 @@ und in einem Browser-Dashboard für Bewerbungen nutzbar gemacht.
 Das Projekt verbindet Python, SQLite, CSV-Workflows, einfache API-Adapter,
 Matching-Logik und Informationsmanagement. Es ist bewusst lokal gebaut: Die
 Bewerbungsdaten bleiben auf dem eigenen Rechner.
-
-![Dashboard overview](docs/assets/screenshots/dashboard-overview.svg)
-
 ## Warum habe ich das gebaut?
 
 Bei der Jobsuche entstehen schnell unübersichtliche Informationsmengen:
