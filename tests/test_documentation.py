@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest import TestCase
 
@@ -9,23 +8,36 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class DocumentationTests(TestCase):
-    def test_browser_extension_workflow_doc_and_mockup_exist(self) -> None:
+    def test_browser_extension_workflow_doc_exists(self) -> None:
         doc = PROJECT_ROOT / "docs" / "browser_extension_workflow.md"
-        svg = PROJECT_ROOT / "docs" / "assets" / "screenshots" / "browser-extension-workflow.svg"
 
         self.assertTrue(doc.exists())
-        self.assertTrue(svg.exists())
         text = doc.read_text(encoding="utf-8")
         self.assertIn("kein Plattform-Scraping", text)
         self.assertIn("aktuell geöffnete Seite", text)
-        ET.parse(svg)
 
-    def test_readme_links_to_extension_workflow_assets(self) -> None:
+    def test_readme_links_to_real_png_screenshots(self) -> None:
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        screenshots = [
+            "docs/assets/screenshots/01-dashboard-start.png",
+            "docs/assets/screenshots/02-research-prompt.png",
+            "docs/assets/screenshots/03-job-detail.png",
+            "docs/assets/screenshots/04-fullscreen-ratings.png",
+            "docs/assets/screenshots/05-reset-empty-state.png",
+        ]
 
-        self.assertIn("docs/browser_extension_workflow.md", readme)
-        self.assertIn("docs/assets/screenshots/browser-extension-workflow.svg", readme)
-        self.assertIn("Browser-Clipper", readme)
+        for screenshot in screenshots:
+            self.assertIn(screenshot, readme)
+            self.assertTrue((PROJECT_ROOT / screenshot).exists(), f"Missing screenshot: {screenshot}")
+
+        old_mockups = [
+            "docs/assets/screenshots/dashboard-overview.svg",
+            "docs/assets/screenshots/job-details.svg",
+            "docs/assets/screenshots/public-export.svg",
+            "docs/assets/screenshots/browser-extension-workflow.svg",
+        ]
+        for old_mockup in old_mockups:
+            self.assertNotIn(old_mockup, readme)
 
     def test_markdown_links_in_readme_resolve_for_local_docs(self) -> None:
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
