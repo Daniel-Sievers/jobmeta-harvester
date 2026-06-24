@@ -1,6 +1,6 @@
 {
   "name": "jobmeta-harvester-demo",
-  "version": "0.55.0",
+  "version": "0.56.0",
   "private": true,
   "description": "Installierbare PWA mit derselben Dashboard-Oberfläche wie die lokale App.",
   "scripts": {

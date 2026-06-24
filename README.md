@@ -436,7 +436,7 @@ Es ist ein Portfolio-Projekt, das zeigt:
 
 ## Version
 
-Aktueller Public-Stand: **v55**. `/demo/` startet mit verpflichtender Demo-Auswahl und gibt die komplette Oberfläche nach dem Laden frei. `/app/` bleibt der normale Werkzeugmodus; beide Modi nutzen dieselbe Dashboard-Oberfläche, getrennten Browser-Speicher und eine bereinigte Bedienleiste ohne Entwickler-Export-Button.
+Aktueller Public-Stand: **v56**. `/demo/` startet mit verpflichtender Demo-Auswahl und gibt die komplette Oberfläche nach dem Laden frei. `/app/` bleibt der normale Werkzeugmodus; beide Modi nutzen dieselbe Dashboard-Oberfläche, getrennten Browser-Speicher, eine Reset-Funktion für Jobdaten und eine horizontale Scrollleiste, die sich bei offenen Dialogen nicht mehr über Formularbuttons legt.
 
 
 ### Vercel-Deploy-Hinweis

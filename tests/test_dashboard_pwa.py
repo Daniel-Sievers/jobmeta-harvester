@@ -30,7 +30,7 @@ class DashboardPwaTest(unittest.TestCase):
         self.assertIn("128x128", sizes)
 
     def test_dashboard_service_worker_uses_dashboard_assets_not_separate_demo(self) -> None:
-        self.assertIn("jobmeta-dashboard-v55", DASHBOARD_SERVICE_WORKER)
+        self.assertIn("jobmeta-dashboard-v56", DASHBOARD_SERVICE_WORKER)
         self.assertIn("/manifest.webmanifest", DASHBOARD_SERVICE_WORKER)
         self.assertIn("/offline.html", DASHBOARD_SERVICE_WORKER)
         self.assertIn("/favicon.ico", DASHBOARD_SERVICE_WORKER)
@@ -46,6 +46,9 @@ class DashboardPwaTest(unittest.TestCase):
         self.assertNotIn("GitHub-Paket erstellen", DASHBOARD_HTML)
         self.assertIn("overflow-x: hidden", DASHBOARD_HTML)
         self.assertIn("height: 48px", DASHBOARD_HTML)
+        self.assertIn("Daten zurücksetzen", DASHBOARD_HTML)
+        self.assertIn("/api/reset-data", DASHBOARD_HTML)
+        self.assertIn("body.drawer-active .horizontal-scroll-dock", DASHBOARD_HTML)
 
 
 if __name__ == "__main__":

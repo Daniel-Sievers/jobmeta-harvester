@@ -1,11 +1,13 @@
 {
   "name": "JobMeta Harvester",
-  "version": "v55",
+  "version": "v56",
   "route": "/",
   "demo_route": "/demo/",
   "app_route": "/app/",
   "type": "static-pwa-demo-and-tool",
   "privacy": "browser-local-demo-data-only",
   "last_updated": "2026-06-21",
-  "note": "Root URL shows mode selection. /demo and /app use the same dashboard HTML as the local Python dashboard; static API shim provides browser-local demo data."
+  "note": "Root URL shows mode selection. /demo and /app use the same dashboard HTML as the local Python dashboard; static API shim provides browser-local demo data.",
+  "label": "JobMeta Harvester Public v56",
+  "notes": "Reset action and drawer-safe horizontal scroll dock."
 }

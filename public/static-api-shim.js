@@ -1,8 +1,8 @@
 (() => {
   const nativeFetch = window.fetch.bind(window);
   const mode = location.pathname.replace(/\/$/, '') === '/demo' ? 'demo' : 'app';
-  const VERSION = 'v55';
-  // Storage marker for tests and documentation: jobmeta_static_demo_jobs_v55
+  const VERSION = 'v56';
+  // Storage marker for tests and documentation: jobmeta_static_demo_jobs_v56
   const stateKey = mode === 'demo' ? `jobmeta_static_demo_jobs_${VERSION}` : `jobmeta_static_app_jobs_${VERSION}`;
   const profileKey = mode === 'demo' ? `jobmeta_static_demo_profile_${VERSION}` : `jobmeta_static_app_profile_${VERSION}`;
   const datasetKey = mode === 'demo' ? `jobmeta_static_demo_dataset_${VERSION}` : `jobmeta_static_app_dataset_${VERSION}`;
@@ -298,6 +298,11 @@
     }
     if (path === '/api/export-csv') {
       return textResponse(csvFromJobs(getJobs()), 'text/csv; charset=utf-8');
+    }
+    if (path === '/api/reset-data' && init.method === 'POST') {
+      const deleted = getJobs().length;
+      setJobs([]);
+      return apiResponse({ ok: true, deleted, jobs: [] });
     }
     if (path === '/api/import-csv' && init.method === 'POST') {
       const request = JSON.parse(init.body || '{}');

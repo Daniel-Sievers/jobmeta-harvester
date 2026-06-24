@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jobmeta-demo-v55';
+const CACHE_NAME = 'jobmeta-demo-v56';
 const CORE_ASSETS = [
   './',
   './index.html',

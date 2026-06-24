@@ -90,13 +90,13 @@ def main() -> int:
                 fail(f"{name} app still contains obsolete static demo marker: {obsolete}")
 
     shim = (ROOT / "static-api-shim.js").read_text(encoding="utf-8")
-    for marker in ["/api/jobs", "/api/load-demo", "static-api-data.json", "jobmeta_static_demo_jobs_v55"]:
+    for marker in ["/api/jobs", "/api/load-demo", "static-api-data.json", "jobmeta_static_demo_jobs_v56"]:
         if marker not in shim:
             fail(f"static API shim missing marker: {marker}")
 
     data = json.loads((ROOT / "data" / "static-api-data.json").read_text(encoding="utf-8"))
-    if data.get("version") != "v55":
-        fail("static demo data must be v55")
+    if data.get("version") != "v56":
+        fail("static demo data must be v56")
     if len(data.get("profiles", [])) != 3 or len(data.get("datasets", [])) != 3:
         fail("static demo data must contain three profiles and three datasets")
     scored = data.get("scored", {})
@@ -108,7 +108,7 @@ def main() -> int:
                 fail(f"scored data for {profile}/{dataset} is unexpectedly small")
 
     service_worker = (ROOT / "service-worker.js").read_text(encoding="utf-8")
-    for marker in ["jobmeta-demo-v55", "./static-api-shim.js", "./data/static-api-data.json"]:
+    for marker in ["jobmeta-demo-v56", "./static-api-shim.js", "./data/static-api-data.json"]:
         if marker not in service_worker:
             fail(f"service worker missing marker: {marker}")
 

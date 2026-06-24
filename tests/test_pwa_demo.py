@@ -22,7 +22,7 @@ class PwaDemoTest(unittest.TestCase):
 
     def test_static_api_data_contains_three_profiles_and_datasets(self) -> None:
         data = json.loads((ROOT / "data" / "static-api-data.json").read_text(encoding="utf-8"))
-        self.assertEqual(data["version"], "v55")
+        self.assertEqual(data["version"], "v56")
         self.assertEqual(len(data["profiles"]), 3)
         self.assertEqual(len(data["datasets"]), 3)
         self.assertEqual(len(data["scored"]), 3)
@@ -48,6 +48,8 @@ class PwaDemoTest(unittest.TestCase):
             self.assertIn("Status und Notizen", html)
             self.assertIn('/static-api-shim.js', html)
             self.assertIn("Die feste Leiste am unteren Fensterrand scrollt die Tabelle horizontal", html)
+            self.assertIn("Daten zurücksetzen", html)
+            self.assertIn("drawer-active", html)
             self.assertNotIn("Jobanzeigen als Metadaten analysieren", html)
             self.assertNotIn("jobmeta_demo_state_v48", html)
             self.assertNotIn("topPublicExportButton", html)
@@ -59,6 +61,7 @@ class PwaDemoTest(unittest.TestCase):
         self.assertIn("height: 48px", html)
         self.assertIn("background: var(--bg)", html)
         self.assertIn("scrollbar-width: auto", html)
+        self.assertIn("body.drawer-active .horizontal-scroll-dock", html)
 
     def test_demo_mode_lock_is_released_after_loading(self) -> None:
         html = (ROOT / "demo" / "index.html").read_text(encoding="utf-8")
@@ -70,14 +73,14 @@ class PwaDemoTest(unittest.TestCase):
 
     def test_static_api_shim_provides_local_api_endpoints(self) -> None:
         script = (ROOT / "static-api-shim.js").read_text(encoding="utf-8")
-        for marker in ["/api/jobs", "/api/load-demo", "/api/analytics", "/api/export-csv", "jobmeta_static_demo_jobs_v55"]:
+        for marker in ["/api/jobs", "/api/load-demo", "/api/analytics", "/api/export-csv", "/api/reset-data", "jobmeta_static_demo_jobs_v56"]:
             self.assertIn(marker, script)
 
     def test_root_service_worker_references_core_assets_and_offline_fallback(self) -> None:
         service_worker = (ROOT / "service-worker.js").read_text(encoding="utf-8")
         for asset in ["./index.html", "./app/index.html", "./demo/index.html", "./offline.html", "./static-api-shim.js", "./data/static-api-data.json", "./manifest.webmanifest", "./assets/favicon.ico", "./assets/icon.svg", "./assets/icon-32.png", "./version.json"]:
             self.assertIn(asset, service_worker)
-        self.assertIn("jobmeta-demo-v55", service_worker)
+        self.assertIn("jobmeta-demo-v56", service_worker)
         self.assertIn("request.mode === 'navigate'", service_worker)
 
     def test_local_full_version_page_is_styled_and_useful(self) -> None:
@@ -109,7 +112,7 @@ class PwaDemoTest(unittest.TestCase):
     def test_local_demo_check_no_longer_404s(self) -> None:
         self.assertTrue((ROOT / "demo" / "check" / "index.html").exists())
         version = json.loads((ROOT / "version.json").read_text(encoding="utf-8"))
-        self.assertEqual(version["version"], "v55")
+        self.assertEqual(version["version"], "v56")
         self.assertEqual(version["route"], "/")
         self.assertEqual(version["demo_route"], "/demo/")
         self.assertEqual(version["app_route"], "/app/")

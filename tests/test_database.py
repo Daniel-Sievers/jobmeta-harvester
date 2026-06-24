@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from src.jobmeta_harvester.database import (
+    delete_all_jobs,
     delete_jobs_by_source_prefixes,
     import_jobs_csv,
     import_tracking_csv,
@@ -176,6 +177,25 @@ class DatabaseTest(TestCase):
             self.assertEqual(deleted, 2)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["source"], "manual")
+
+
+    def test_delete_all_jobs_clears_database_but_keeps_schema(self):
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "jobs.sqlite"
+            upsert_jobs(
+                [
+                    _job(title="Demo Metadata", source="demo"),
+                    _job(title="Manual Metadata", source="manual"),
+                ],
+                PROFILE,
+                db_path,
+            )
+
+            deleted = delete_all_jobs(db_path)
+            rows = list_jobs(db_path)
+
+            self.assertEqual(deleted, 2)
+            self.assertEqual(rows, [])
 
 
 def _job(title: str, source: str = "sample") -> JobPosting:
