@@ -4,9 +4,10 @@ import csv
 import io
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .matching import score_job
 from .models import JobPosting
@@ -360,6 +361,14 @@ def delete_jobs_by_source_prefixes(db_path: Path, prefixes: list[str]) -> int:
     return deleted
 
 
+def delete_all_jobs(db_path: Path) -> int:
+    """Delete all job records while keeping the database schema and profile files intact."""
+    init_db(db_path)
+    with _connect(db_path) as connection:
+        cursor = connection.execute("DELETE FROM jobs")
+    return cursor.rowcount
+
+
 def rescore_jobs(profile: dict, db_path: Path) -> int:
     init_db(db_path)
     updated = 0
@@ -487,10 +496,19 @@ def make_job_key(job: JobPosting) -> str:
     return "|".join([_slug(job.source), _slug(job.source_id), _slug(job.url)])
 
 
-def _connect(db_path: Path) -> sqlite3.Connection:
+@contextmanager
+def _connect(db_path: Path) -> Iterator[sqlite3.Connection]:
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
-    return connection
+    try:
+        yield connection
+    except Exception:
+        connection.rollback()
+        raise
+    else:
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _migrate_columns(connection: sqlite3.Connection) -> None:
